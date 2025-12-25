@@ -1,17 +1,18 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import type { StaffMember } from './types';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
     checkStaffPin: (pin: string) => ipcRenderer.invoke('db:check-staff-pin', pin),
     getStaffList: () => ipcRenderer.invoke('db:get-staff-list'),
-    syncFullPull: () => ipcRenderer.invoke('sync:full-pull'),
-    // On spécifie le type ici aussi au lieu de any
-    syncStaff: (staffData: StaffMember[]) => ipcRenderer.invoke('db:sync-staff', staffData),
+    syncStaff: (staffData: any) => ipcRenderer.invoke('db:sync-staff', staffData),
+    syncFullPull: () => ipcRenderer.invoke('db:sync-full-pull'),
+    
+    // NOUVEAU : Catalogue
+    getCategories: () => ipcRenderer.invoke('db:get-categories'),
+    getProductsByCategory: (categoryId: string) => ipcRenderer.invoke('db:get-products-by-category', categoryId),
+    getProductVariations: (productId: string) => ipcRenderer.invoke('db:get-product-variations', productId),
   },
-  
-  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
-  onNetworkStatusChange: (callback: (status: boolean) => void) => {
-    ipcRenderer.on('network-status', (_event, status) => callback(status));
-  }
+  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
+  onNetworkStatusChange: (callback: (status: boolean) => void) => 
+    ipcRenderer.on('network-status', (_event, status) => callback(status)),
 });

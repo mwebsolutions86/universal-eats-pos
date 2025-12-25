@@ -3,7 +3,6 @@ import path from 'path';
 import { app } from 'electron';
 
 // Définition du chemin de la base de données
-// On utilise app.getPath('userData') pour être compatible Windows 7 à 11
 const dbPath = path.join(app.getPath('userData'), 'pos_local.db');
 
 export const initLocalDatabase = () => {
@@ -12,6 +11,8 @@ export const initLocalDatabase = () => {
 
     // Pragma pour améliorer les performances SQLite
     db.pragma('journal_mode = WAL');
+
+    // --- MODULE 1 : VENTE & SESSION ---
 
     // 1. Table des Sessions de Caisse
     db.prepare(`
@@ -44,7 +45,7 @@ export const initLocalDatabase = () => {
         )
     `).run();
 
-    // 3. Table des Items
+    // 3. Table des Items de commande
     db.prepare(`
         CREATE TABLE IF NOT EXISTS local_order_items (
             id TEXT PRIMARY KEY,
@@ -59,42 +60,94 @@ export const initLocalDatabase = () => {
         )
     `).run();
 
-    // 4. Table Cache du Staff (Profiles)
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS local_staff_cache (
-        id TEXT PRIMARY KEY,          -- UUID de Supabase
-        full_name TEXT,
-        role TEXT,                   -- 'admin', 'staff'
-        pos_pin TEXT,                -- Code PIN hashé ou clair (selon votre choix de sécurité)
-        avatar_url TEXT,
-        last_synced DATETIME DEFAULT CURRENT_TIMESTAMP
-    )
-`).run();
+    // --- MODULE 2 : RESSOURCES HUMAINES ---
 
-// 5. Table des Produits (Cache local)
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS local_products (
-        id TEXT PRIMARY KEY,
-        category_id TEXT,
-        name TEXT NOT NULL,
-        description TEXT,
-        price REAL NOT NULL,
-        image_url TEXT,
-        is_available INTEGER DEFAULT 1,
-        sync_status TEXT DEFAULT 'synced'
-    )
-`).run();
+    // 4. Table Cache du Staff
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_staff_cache (
+            id TEXT PRIMARY KEY,
+            full_name TEXT,
+            role TEXT,
+            pos_pin TEXT,
+            avatar_url TEXT,
+            last_synced DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `).run();
 
-// 6. Table des Catégories
-db.prepare(`
-    CREATE TABLE IF NOT EXISTS local_categories (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        display_order INTEGER
-    )
-`).run();
+    // --- MODULE 3 : CATALOGUE PRODUIT (LE CŒUR DU SYSTÈME) ---
 
-    console.log('✅ Base de données SQLite prête :', dbPath);
+    // 5. Table des Catégories
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_categories (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            display_order INTEGER
+        )
+    `).run();
+
+    // 6. Table des Produits
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_products (
+            id TEXT PRIMARY KEY,
+            category_id TEXT,
+            name TEXT NOT NULL,
+            description TEXT,
+            price REAL NOT NULL,
+            image_url TEXT,
+            is_available INTEGER DEFAULT 1,
+            sync_status TEXT DEFAULT 'synced'
+        )
+    `).run();
+
+    // 7. [NOUVEAU] Variations de Produits (Ex: Taille S, M, L)
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_product_variations (
+            id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            price REAL NOT NULL,
+            is_available INTEGER DEFAULT 1,
+            sort_order INTEGER,
+            FOREIGN KEY (product_id) REFERENCES local_products(id) ON DELETE CASCADE
+        )
+    `).run();
+
+    // 8. [NOUVEAU] Groupes d'Options (Ex: "Choix de Sauce", "Suppléments")
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_option_groups (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            type TEXT, -- 'single' ou 'multiple'
+            min_selection INTEGER DEFAULT 0,
+            max_selection INTEGER DEFAULT 1
+        )
+    `).run();
+
+    // 9. [NOUVEAU] Items d'Options (Ex: "Ketchup", "Mayonnaise", "Bacon")
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_option_items (
+            id TEXT PRIMARY KEY,
+            group_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            price REAL DEFAULT 0,
+            is_available INTEGER DEFAULT 1,
+            FOREIGN KEY (group_id) REFERENCES local_option_groups(id) ON DELETE CASCADE
+        )
+    `).run();
+
+    // 10. [NOUVEAU] Lien Produit <-> Groupe d'Options (Table de pivot)
+    // Permet de dire : "Ce Burger (Product) a accès au groupe 'Sauces' (OptionGroup)"
+    db.prepare(`
+        CREATE TABLE IF NOT EXISTS local_product_option_links (
+            product_id TEXT NOT NULL,
+            group_id TEXT NOT NULL,
+            sort_order INTEGER,
+            PRIMARY KEY (product_id, group_id),
+            FOREIGN KEY (product_id) REFERENCES local_products(id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES local_option_groups(id) ON DELETE CASCADE
+        )
+    `).run();
+
+    console.log('✅ Base de données SQLite initialisée avec succès (Structure Complète v2).');
     return db;
 };
-
