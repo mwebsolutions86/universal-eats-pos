@@ -1,17 +1,21 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "ESNext",
-    "jsx": "react-jsx", // Indispensable pour React 17/18+
-    "moduleResolution": "node",
-    "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true,
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020", "DOM"],
+    "allowJs": true,
+    "jsx": "react-jsx",
+    "sourceMap": true,
+    "noImplicitAny": false,
     "strict": true,
+    "esModuleInterop": true,
     "skipLibCheck": true,
-    "baseUrl": ".",
-    "paths": {
-      "*": ["node_modules/*"]
-    }
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "types": ["node"]
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*",
+    "webpack.*.ts"
+  ]
 }

@@ -1,11 +1,9 @@
 import type { ModuleOptions } from 'webpack';
 
 export const rules: Required<ModuleOptions>['rules'] = [
-  // Add support for native node modules
+  // Support des modules natifs
   {
-    // We're specifying native_modules in the test because the asset relocator loader generates a
-    // "fake" .node file which is really a cjs file.
-    test: /native_modules[/\\].+\.node$/,
+    test: /native_modules\/.+\.node$/,
     use: 'node-loader',
   },
   {
@@ -18,6 +16,7 @@ export const rules: Required<ModuleOptions>['rules'] = [
       },
     },
   },
+  // Support TypeScript
   {
     test: /\.tsx?$/,
     exclude: /(node_modules|\.webpack)/,
@@ -28,4 +27,5 @@ export const rules: Required<ModuleOptions>['rules'] = [
       },
     },
   },
+  // ❌ J'ai retiré la règle CSS d'ici pour éviter le doublon
 ];

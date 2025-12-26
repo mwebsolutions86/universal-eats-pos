@@ -1,17 +1,27 @@
-import React from 'react';
-import { createRoot } from 'react-dom/client';
-import App from './App'; // On importe App au lieu de LoginScreen
 import './index.css';
+import * as React from 'react';
+import { createRoot } from 'react-dom/client';
+import App from './App';
 
-const container = document.getElementById('root');
+// Fonction de démarrage
+const startApp = () => {
+    const container = document.getElementById('root');
+    
+    if (!container) {
+        console.error("ERREUR CRITIQUE: Impossible de trouver <div id='root'>. Réessai...");
+        return;
+    }
 
-if (container) {
-  const root = createRoot(container);
-  root.render(
-    <React.StrictMode>
-      <App />
-    </React.StrictMode>
-  );
+    const root = createRoot(container);
+    root.render(<App />);
+};
+
+// --- LE FIX EST ICI ---
+// On vérifie si le DOM est déjà chargé ou s'il faut l'attendre
+if (document.readyState === 'loading') {
+    // Si ça charge encore, on attend l'événement
+    document.addEventListener('DOMContentLoaded', startApp);
 } else {
-  console.error("L'élément avec l'ID 'root' est introuvable dans index.html");
+    // Si c'est déjà prêt, on lance tout de suite
+    startApp();
 }

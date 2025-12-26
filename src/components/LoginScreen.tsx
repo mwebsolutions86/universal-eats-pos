@@ -59,7 +59,7 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLoginSuccess }) => {
 
       {/* Indicateur PIN */}
       <div className="flex space-x-4 mb-10">
-        {[...Array(4)].map((_, i) => (
+        {[...Array(6)].map((_, i) => (
           <div 
             key={i}
             className={`w-4 h-4 rounded-full border-2 transition-colors ${

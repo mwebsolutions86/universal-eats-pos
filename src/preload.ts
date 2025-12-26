@@ -1,18 +1,40 @@
+// See the Electron documentation for details on how to use preload scripts:
+// https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
+
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
   db: {
+    // --- AUTH & STAFF ---
     checkStaffPin: (pin: string) => ipcRenderer.invoke('db:check-staff-pin', pin),
     getStaffList: () => ipcRenderer.invoke('db:get-staff-list'),
-    syncStaff: (staffData: any) => ipcRenderer.invoke('db:sync-staff', staffData),
+    
+    // --- SYNC ---
     syncFullPull: () => ipcRenderer.invoke('db:sync-full-pull'),
     
-    // NOUVEAU : Catalogue
+    // --- CATALOGUE ---
     getCategories: () => ipcRenderer.invoke('db:get-categories'),
     getProductsByCategory: (categoryId: string) => ipcRenderer.invoke('db:get-products-by-category', categoryId),
     getProductVariations: (productId: string) => ipcRenderer.invoke('db:get-product-variations', productId),
+
+    // --- CRM CLIENTS ---
+    searchCustomers: (query: string) => ipcRenderer.invoke('db:search-customers', query),
+    
+    // CORRECTION ICI : Remplacement de 'any' par un objet typé
+    createCustomer: (customer: { full_name: string; phone: string; address?: string }) => 
+      ipcRenderer.invoke('db:create-customer', customer),
+      
+    syncCustomers: () => ipcRenderer.invoke('db:sync-customers'),
+
+    // --- COMMANDES LIVE ---
+    getLiveOrders: () => ipcRenderer.invoke('db:get-live-orders'),
+    updateOrderStatus: (orderId: string, status: string) => ipcRenderer.invoke('db:update-order-status', orderId, status),
   },
-  getAppVersion: () => ipcRenderer.invoke('app:get-version'),
-  onNetworkStatusChange: (callback: (status: boolean) => void) => 
-    ipcRenderer.on('network-status', (_event, status) => callback(status)),
+  
+  // --- SYSTÈME ---
+  getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  onNetworkStatusChange: (callback: (status: boolean) => void) => {
+    // Placeholder pour la gestion online/offline future
+    callback(true);
+  }
 });
