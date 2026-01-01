@@ -1,5 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import * as React from 'react';
 import type { StaffMember } from '../types';
+
+// Extraction des hooks depuis l'import en étoile
+const { useState, useEffect } = React;
 
 interface LoginScreenProps {
   onLoginSuccess: (user: StaffMember) => void;

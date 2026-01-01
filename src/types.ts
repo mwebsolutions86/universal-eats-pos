@@ -1,11 +1,30 @@
+// src/types.ts
+
 // --- Types Globaux ---
+
+export type UserRole = 'owner' | 'manager' | 'cashier' | 'staff' | 'driver' | 'super_admin' | 'admin';
 
 export interface StaffMember {
   id: string;
+  store_id: string | null;
   full_name: string | null;
-  role: string | null;
+  role: UserRole | null;
   avatar_url: string | null;
   pos_pin?: string | null;
+}
+
+export interface POSSession {
+  id: string;
+  store_id: string;
+  opened_by: string; 
+  opened_at: string;
+  closed_at?: string | null;
+  opening_balance: number;
+  closing_balance?: number | null; 
+  actual_closing_balance?: number | null; 
+  difference?: number | null;
+  notes?: string | null;
+  status: 'open' | 'closed';
 }
 
 export interface Customer {
@@ -15,40 +34,6 @@ export interface Customer {
   address?: string | null;
   loyalty_points?: number;
 }
-
-// --- Interface du Pont (Bridge) Electron <-> React ---
-export interface IElectronAPI {
-  db: {
-    // Auth & Staff
-    checkStaffPin: (pin: string) => Promise<StaffMember | null>;
-    getStaffList: () => Promise<StaffMember[]>;
-    syncFullPull: () => Promise<{ success: boolean; error?: string }>;
-    
-    // Catalogue
-    getCategories: () => Promise<Category[]>;
-    getProductsByCategory: (categoryId: string) => Promise<Product[]>;
-    getProductVariations: (productId: string) => Promise<ProductVariation[]>;
-    
-    // Commandes Live (Web/App)
-    getLiveOrders: () => Promise<Order[]>;
-    updateOrderStatus: (orderId: string, status: string) => Promise<void>;
-
-    // CRM Clients
-    searchCustomers: (query: string) => Promise<Customer[]>;
-    createCustomer: (customer: Omit<Customer, 'id'>) => Promise<Customer>;
-    syncCustomers: () => Promise<void>;
-  };
-  getAppVersion: () => Promise<string>;
-  onNetworkStatusChange: (callback: (status: boolean) => void) => void;
-}
-
-declare global {
-  interface Window {
-    electronAPI: IElectronAPI;
-  }
-}
-
-// --- Types Métier (Miroirs Supabase) ---
 
 export interface Category {
   id: string;
@@ -77,6 +62,12 @@ export interface ProductVariation {
   sort_order: number | null;
 }
 
+export interface ProductOptionLink {
+  product_id: string;
+  group_id: string;
+  sort_order: number | null;
+}
+
 export interface OptionGroup {
   id: string;
   name: string;
@@ -93,29 +84,27 @@ export interface OptionItem {
   is_available: boolean | null;
 }
 
-export interface ProductOptionLink {
-  product_id: string;
-  group_id: string;
-  sort_order: number | null;
-}
-
-// --- Types Commandes ---
+// --- Commandes & Panier ---
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'phone';
+
+export interface CartItem {
+  product: Product;
+  variation?: ProductVariation;
+  qty: number;
+}
 
 export interface Order {
   id: string;
   order_number: number;
-  // Infos Client
   customer_id?: string | null;
-  customer?: Customer; // Objet complet pour affichage facile
+  customer?: Customer;
   customer_name: string | null;
   customer_phone: string | null;
   delivery_address: string | null;
-  // Infos Commande
   order_type: OrderType;
   total_amount: number;
-  status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled';
+  status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled' | 'out_for_delivery';
   payment_status: 'pending' | 'paid';
   channel: 'web' | 'app' | 'pos';
   created_at: string;
@@ -128,6 +117,50 @@ export interface OrderItem {
   quantity: number;
   unit_price: number;
   total_price: number;
-  // JSON parsé des options choisies (ex: { "Sauce": "Algérienne", "Taille": "L" })
   options?: Record<string, unknown> | null; 
+}
+
+// --- Interface Bridge Electron ---
+
+export interface IElectronAPI {
+  db: {
+    checkStaffPin: (pin: string) => Promise<StaffMember | null>;
+    getStaffList: () => Promise<StaffMember[]>;
+    
+    // Synchro Globale
+    syncFullPull: () => Promise<{ success: boolean; error?: string }>;
+    
+    // ✅ Synchro Commandes Live (Web/App)
+    syncLiveOrders: () => Promise<{ success: boolean; count?: number; error?: string }>;
+
+    getCategories: () => Promise<Category[]>;
+    getProductsByCategory: (categoryId: string) => Promise<Product[]>;
+    getProductVariations: (productId: string) => Promise<ProductVariation[]>;
+    
+    getLiveOrders: () => Promise<Order[]>;
+    updateOrderStatus: (orderId: string, status: string) => Promise<void>;
+
+    searchCustomers: (query: string) => Promise<Customer[]>;
+    createCustomer: (customer: Omit<Customer, 'id'>) => Promise<Customer>;
+    syncCustomers: () => Promise<void>;
+
+    createOrder: (orderData: {
+      items: CartItem[];
+      total: number;
+      paymentMethod: string;
+      amountReceived?: number;
+      storeId: string;
+      sessionId: string;
+      customerId?: string;
+      orderType: string;
+    }) => Promise<{ success: boolean; orderId?: string; error?: string }>;
+  };
+  getAppVersion: () => Promise<string>;
+  onNetworkStatusChange: (callback: (status: boolean) => void) => void;
+}
+
+declare global {
+  interface Window {
+    electronAPI: IElectronAPI;
+  }
 }

@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // --- SYNC ---
     syncFullPull: () => ipcRenderer.invoke('db:sync-full-pull'),
+    // ✅ Nouvelle méthode exposée
+    syncLiveOrders: () => ipcRenderer.invoke('db:sync-live-orders'),
     
     // --- CATALOGUE ---
     getCategories: () => ipcRenderer.invoke('db:get-categories'),
@@ -19,16 +21,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
     // --- CRM CLIENTS ---
     searchCustomers: (query: string) => ipcRenderer.invoke('db:search-customers', query),
-    
-    // CORRECTION ICI : Remplacement de 'any' par un objet typé
     createCustomer: (customer: { full_name: string; phone: string; address?: string }) => 
       ipcRenderer.invoke('db:create-customer', customer),
-      
     syncCustomers: () => ipcRenderer.invoke('db:sync-customers'),
 
     // --- COMMANDES LIVE ---
     getLiveOrders: () => ipcRenderer.invoke('db:get-live-orders'),
     updateOrderStatus: (orderId: string, status: string) => ipcRenderer.invoke('db:update-order-status', orderId, status),
+
+    // --- TRANSACTIONNEL ---
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    createOrder: (orderData: any) => ipcRenderer.invoke('db:create-order', orderData),
   },
   
   // --- SYSTÈME ---

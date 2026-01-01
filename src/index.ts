@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, session } from 'electron'; // <--- AJOUTEZ 'session' ICI
+import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { config } from 'dotenv';
 config();
 
@@ -28,7 +28,7 @@ const createWindow = () => {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // <--- DESACTIVE TEMPORAIREMENT LA SECURITE WEB STRICTE (Pour les images)
+      webSecurity: false // Désactivé pour les images locales/externes
     },
   });
 
@@ -39,8 +39,7 @@ const createWindow = () => {
 };
 
 app.on('ready', () => {
-  // --- FIX SUPRÊME DES IMAGES (CSP) ---
-  // On force les headers de sécurité pour tout autoriser
+  // --- CSP FIX ---
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -51,9 +50,10 @@ app.on('ready', () => {
       }
     })
   });
-  // ------------------------------------
 
-  // --- HANDLERS ---
+  // --- HANDLERS BASE DE DONNEES ---
+
+  // Auth
   ipcMain.handle('db:check-staff-pin', async (_event, pin) => {
     return db.prepare('SELECT * FROM local_staff_cache WHERE pos_pin = ?').get(pin);
   });
@@ -62,6 +62,7 @@ app.on('ready', () => {
     return db.prepare('SELECT * FROM local_staff_cache').all();
   });
 
+  // Sync Global
   ipcMain.handle('db:sync-full-pull', async () => {
     try {
       return await syncService.syncAll();
@@ -71,6 +72,17 @@ app.on('ready', () => {
     }
   });
 
+  // ✅ AJOUT : Sync Orders Only (Polling)
+  ipcMain.handle('db:sync-live-orders', async () => {
+    try {
+      return await syncService.syncLiveOrders();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : String(error);
+      return { success: false, error: msg };
+    }
+  });
+
+  // Catalogue
   ipcMain.handle('db:get-categories', async () => {
     return db.prepare('SELECT * FROM local_categories ORDER BY display_order ASC').all();
   });
@@ -83,6 +95,7 @@ app.on('ready', () => {
     return db.prepare('SELECT * FROM local_product_variations WHERE product_id = ? ORDER BY sort_order ASC').all(productId);
   });
 
+  // CRM
   ipcMain.handle('db:search-customers', async (_event, query) => {
     const sql = `SELECT * FROM local_customers WHERE full_name LIKE ? OR phone LIKE ? LIMIT 10`;
     const wildcard = `%${query}%`;
@@ -98,12 +111,19 @@ app.on('ready', () => {
   
   ipcMain.handle('db:sync-customers', async () => { return true; });
 
+  // Live Orders
   ipcMain.handle('db:get-live-orders', async () => {
     return db.prepare(`SELECT * FROM local_orders WHERE status NOT IN ('cancelled', 'delivered') ORDER BY created_at DESC LIMIT 50`).all();
   });
   
   ipcMain.handle('db:update-order-status', async (_event, orderId, status) => {
     db.prepare('UPDATE local_orders SET status = ? WHERE id = ?').run(status, orderId);
+  });
+
+  // Transactionnel (POS)
+  ipcMain.handle('db:create-order', async (_event, orderData) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (db as any).createOrder(orderData);
   });
 
   createWindow();

@@ -1,39 +1,134 @@
+// eslint-disable-next-line import/namespace
 import { createClient } from '@supabase/supabase-js';
 import { Database } from 'better-sqlite3'; 
 import { 
-  StaffMember, 
-  Category, 
-  OptionGroup, 
-  OptionItem, 
-  Product, 
-  ProductVariation, 
-  ProductOptionLink,
-  Customer 
+  StaffMember, Category, OptionGroup, OptionItem, 
+  Product, ProductVariation, ProductOptionLink, Customer 
 } from '../types';
 
 export class SyncService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private supabase: any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private supabaseAdmin: any; // Client privilégié pour contourner le RLS
   private db: Database;
+  private storeId: string | undefined;
+  private brandId: string | undefined;
 
   constructor(db: Database) {
     this.db = db;
-
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_ANON_KEY;
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Nouvelle variable
+    this.storeId = process.env.STORE_ID;
 
     if (!supabaseUrl || !supabaseKey) {
-      throw new Error("Missing Supabase environment variables. Please check your .env file.");
+      throw new Error("Missing Supabase vars.");
     }
-
+    
+    // Client standard (Anon)
     this.supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Client Admin (Service Role) - Uniquement si la clé est présente
+    if (serviceRoleKey) {
+        console.log("⚡ Mode Admin activé pour la synchro (Service Role Key détectée)");
+        this.supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, {
+            auth: { autoRefreshToken: false, persistSession: false }
+        });
+    }
   }
 
-  async syncAll(): Promise<{ success: boolean; error?: string }> {
-    console.log('🔄 DÉBUT: Synchronisation complète...');
-    const start = performance.now();
+  private async initContext() {
+    if (!this.storeId) throw new Error("CRITICAL: STORE_ID not set in environment.");
 
+    if (!this.brandId) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: store, error } = await this.supabase
+        .from('stores')
+        .select('brand_id, name')
+        .eq('id', this.storeId)
+        .single();
+
+        if (error || !store) throw new Error(`Store introuvable: ${JSON.stringify(error)}`);
+        this.brandId = store.brand_id;
+        
+        const setConfig = this.db.prepare("INSERT OR REPLACE INTO local_config (key, value) VALUES (?, ?)");
+        setConfig.run('STORE_ID', this.storeId);
+        setConfig.run('BRAND_ID', this.brandId);
+        setConfig.run('STORE_NAME', store.name);
+    }
+  }
+
+  // --- SYNC COMMANDES LIVE (Web & App) ---
+  async syncLiveOrders(): Promise<{ success: boolean; count?: number; error?: string }> {
     try {
+        await this.initContext();
+        
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: orders, error } = await this.supabase
+            .from('orders')
+            .select(`*, order_items (*)`)
+            .eq('store_id', this.storeId)
+            .in('status', ['pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery']); 
+
+        if (error) throw error;
+        if (!orders || orders.length === 0) return { success: true, count: 0 };
+
+        const upsertOrder = this.db.prepare(`
+            INSERT OR REPLACE INTO local_orders (
+                id, order_number, store_id, customer_id, customer_name, customer_phone, delivery_address,
+                order_type, total_amount, status, payment_status, payment_method, channel, created_at, sync_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced')
+        `);
+
+        const deleteItems = this.db.prepare('DELETE FROM local_order_items WHERE order_id = ?');
+        
+        const insertItem = this.db.prepare(`
+            INSERT INTO local_order_items (
+                id, order_id, product_id, product_name, quantity, unit_price, total_price, options
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const transaction = this.db.transaction((ordersList: any[]) => {
+            for (const o of ordersList) {
+                upsertOrder.run(
+                    o.id, o.order_number, o.store_id, o.user_id,
+                    o.customer_name, o.customer_phone, o.delivery_address,
+                    o.order_type, o.total_amount, o.status, o.payment_status, o.payment_method,
+                    o.channel, o.created_at
+                );
+
+                deleteItems.run(o.id);
+                if (o.order_items && o.order_items.length > 0) {
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    for (const item of o.order_items) {
+                        insertItem.run(
+                            item.id, item.order_id, item.product_id, item.product_name,
+                            item.quantity, item.unit_price, item.total_price,
+                            JSON.stringify(item.options)
+                        );
+                    }
+                }
+            }
+        });
+
+        transaction(orders);
+        console.log(`📡 Commandes externes sync: ${orders.length}`);
+        return { success: true, count: orders.length };
+
+    } catch (e: unknown) {
+        const err = e instanceof Error ? e.message : String(e);
+        console.error("Erreur syncLiveOrders:", err);
+        return { success: false, error: err };
+    }
+  }
+
+  // --- SYNC GLOBALE ---
+  async syncAll(): Promise<{ success: boolean; error?: string }> {
+    console.log('🔄 START: Synchro Complète...');
+    try {
+      await this.initContext();
       await this.syncStaff();
       await this.syncCustomers();
       await this.syncCategories();
@@ -42,181 +137,176 @@ export class SyncService {
       await this.syncProducts();
       await this.syncProductVariations();
       await this.syncProductOptionLinks();
+      await this.syncLiveOrders();
 
-      const duration = ((performance.now() - start) / 1000).toFixed(2);
-      console.log(`✅ SUCCÈS: Synchronisation terminée en ${duration}s.`);
       return { success: true };
-
-    } catch (error: unknown) { // CORRECTION: 'any' -> 'unknown'
-      console.log("🔥 ERREUR BRUTE (DEBUG):", error);
-
-      // JSON.stringify fonctionne très bien sur 'unknown'
-      const errorMessage = JSON.stringify(error, null, 2);
-      
-      console.error('❌ ERREUR CRITIQUE DE SYNC (Détails):');
-      console.error(errorMessage);
-      
-      return { success: false, error: errorMessage };
+    } catch (error: unknown) {
+      const msg = JSON.stringify(error, null, 2);
+      console.error('❌ ERREUR SYNC:', msg);
+      return { success: false, error: msg };
     }
   }
 
-  // --- MODULE STAFF ---
-
+  // --- SOUS-MÉTHODES ---
+  
   private async syncStaff() {
     console.log('  ↳ Sync Staff...');
     
+    // Utiliser le client Admin s'il est dispo (pour contourner RLS), sinon le client standard
+    const client = this.supabaseAdmin || this.supabase;
+
+    // 1. Récupérer le Staff du Magasin
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await this.supabase
+    const { data: storeStaff, error: err1 } = await client
       .from('profiles')
-      .select('id, full_name, role, pos_pin, avatar_url');
+      .select('id, store_id, full_name, role, pos_pin, avatar_url')
+      .eq('store_id', this.storeId);
+      
+    if (err1) console.error("Erreur sync staff magasin:", err1);
 
-    if (error) {
-      throw new Error(`ERREUR SUPABASE (Profiles): ${JSON.stringify(error)}`);
-    }
-    
-    if (!data) return;
-    
-    const upsert = this.db.prepare(`
-      INSERT OR REPLACE INTO local_staff_cache (id, full_name, role, pos_pin, avatar_url)
-      VALUES (?, ?, ?, ?, ?)
-    `);
+    // 2. Récupérer les Admins Globaux (Super Admin / Owner) - Indépendamment du store_id
+    // On élargit la liste des rôles pour couvrir les erreurs de casse (Owner, owner, etc.)
+    const adminRoles = [
+        'owner', 'Owner', 'OWNER',
+        'super_admin', 'Super_Admin', 'Super Admin', 'SUPER_ADMIN',
+        'admin', 'Admin', 'ADMIN'
+    ];
 
-    const transaction = this.db.transaction((items: StaffMember[]) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: admins, error: err2 } = await client
+      .from('profiles')
+      .select('id, store_id, full_name, role, pos_pin, avatar_url')
+      .in('role', adminRoles);
+
+    if (err2) console.error("Erreur sync admins:", err2);
+
+    // 3. Fusionner les listes sans doublons
+    const allStaff = [...(storeStaff || []), ...(admins || [])];
+    // Dédoublonnage par ID
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const uniqueStaff = Array.from(new Map(allStaff.map((item: any) => [item.id, item])).values());
+
+    console.log(`  -> ${uniqueStaff.length} utilisateurs trouvés.`);
+    // LOG DE DÉBOGAGE : Affiche les noms trouvés pour vérifier si le Super Admin est là
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    console.log("  -> Liste:", uniqueStaff.map((u: any) => `${u.full_name} (${u.role})`).join(', '));
+
+    const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_staff_cache (id, store_id, full_name, role, pos_pin, avatar_url) VALUES (?, ?, ?, ?, ?, ?)`);
+    
+    const tx = this.db.transaction((items: StaffMember[]) => {
       this.db.prepare('DELETE FROM local_staff_cache').run();
       for (const item of items) {
-        upsert.run(item.id, item.full_name, item.role, item.pos_pin, item.avatar_url);
+        // Conversion PIN en string
+        const pinStr = item.pos_pin ? String(item.pos_pin) : null;
+        
+        // ASTUCE : Si Admin sans store_id, on utilise le store_id local
+        const effectiveStoreId = item.store_id || this.storeId; 
+        
+        upsert.run(item.id, effectiveStoreId, item.full_name, item.role, pinStr, item.avatar_url);
       }
     });
-
-    transaction(data as unknown as StaffMember[]);
+    tx(uniqueStaff as StaffMember[]);
   }
-
-  // --- MODULE CRM (CLIENTS) ---
 
   private async syncCustomers() {
-    console.log('  ↳ Sync Clients...');
-    
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await this.supabase
-      .from('cust_profiles')
-      .select('*');
-
-    if (error) {
-       console.warn("⚠️ Attention: Erreur sync clients (Ignoré - Vérifiez les Policies RLS sur cust_profiles):", JSON.stringify(error));
-       return; 
+    const { data } = await this.supabase.from('cust_profiles').select('*');
+    if (data) {
+      const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_customers (id, full_name, phone, address, loyalty_points) VALUES (?, ?, ?, ?, ?)`);
+      const tx = this.db.transaction((items: Customer[]) => {
+        for (const item of items) upsert.run(item.id, item.full_name, item.phone, item.address, item.loyalty_points || 0);
+      });
+      tx(data as unknown as Customer[]);
     }
-    if (!data) return;
-
-    const upsert = this.db.prepare(`
-      INSERT OR REPLACE INTO local_customers (id, full_name, phone, address, loyalty_points)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-
-    // CORRECTION: Utilisation du type Customer[] au lieu de any[]
-    const transaction = this.db.transaction((items: Customer[]) => {
-      for (const item of items) {
-        upsert.run(item.id, item.full_name, item.phone, item.address, item.loyalty_points || 0);
-      }
-    });
-
-    transaction(data as unknown as Customer[]);
   }
 
-  // --- MODULE CATALOGUE ---
-
   private async syncCategories() {
-    console.log('  ↳ Sync Catégories...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await this.supabase.from('categories').select('*');
-    if (error) throw new Error(`ERREUR Categories: ${JSON.stringify(error)}`);
-    
+    const { data, error } = await this.supabase.from('categories').select('*').eq('brand_id', this.brandId);
+    if (error) throw error;
     if (!data) return;
-    
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_categories (id, name, image_url, display_order) VALUES (?, ?, ?, ?)`);
-    const transaction = this.db.transaction((items: Category[]) => {
+    const tx = this.db.transaction((items: Category[]) => {
+      this.db.prepare('DELETE FROM local_categories').run();
       for (const item of items) upsert.run(item.id, item.name, item.image_url, item.rank || 0);
     });
-    transaction(data as unknown as Category[]);
+    tx(data as unknown as Category[]);
   }
 
   private async syncOptionGroups() {
-    console.log('  ↳ Sync Option Groups...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await this.supabase.from('option_groups').select('*');
-    if (error) throw new Error(`ERREUR OptionGroups: ${JSON.stringify(error)}`);
-
+    const { data, error } = await this.supabase.from('option_groups').select('*').eq('brand_id', this.brandId);
+    if (error) throw error;
     if (!data) return;
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_groups (id, name, type, min_selection, max_selection) VALUES (?, ?, ?, ?, ?)`);
-    const transaction = this.db.transaction((items: OptionGroup[]) => {
+    const tx = this.db.transaction((items: OptionGroup[]) => {
+      this.db.prepare('DELETE FROM local_option_groups').run();
       for (const item of items) upsert.run(item.id, item.name, item.type, item.min_selection, item.max_selection);
     });
-    transaction(data as unknown as OptionGroup[]);
+    tx(data as unknown as OptionGroup[]);
   }
 
   private async syncOptionItems() {
-    console.log('  ↳ Sync Option Items...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await this.supabase.from('option_items').select('*');
-    if (error) throw new Error(`ERREUR OptionItems: ${JSON.stringify(error)}`);
-
+    if (error) throw error;
     if (!data) return;
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_items (id, group_id, name, price, is_available) VALUES (?, ?, ?, ?, ?)`);
-    const transaction = this.db.transaction((items: OptionItem[]) => {
-      for (const item of items) upsert.run(item.id, item.group_id, item.name, item.price, item.is_available ? 1 : 0);
+    const rows = this.db.prepare('SELECT id FROM local_option_groups').all() as { id: string }[];
+    const validGroupIds = new Set(rows.map(r => r.id));
+    const tx = this.db.transaction((items: OptionItem[]) => {
+      this.db.prepare('DELETE FROM local_option_items').run();
+      for (const item of items) {
+        if (item.group_id && validGroupIds.has(item.group_id)) upsert.run(item.id, item.group_id, item.name, item.price, item.is_available ? 1 : 0);
+      }
     });
-    transaction(data as unknown as OptionItem[]);
+    tx(data as unknown as OptionItem[]);
   }
 
   private async syncProducts() {
-    console.log('  ↳ Sync Produits...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data, error } = await this.supabase.from('products').select('*');
-    if (error) throw new Error(`ERREUR Products: ${JSON.stringify(error)}`);
-
+    const { data, error } = await this.supabase.from('products').select('*').eq('brand_id', this.brandId);
+    if (error) throw error;
     if (!data) return;
-    
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_products (id, category_id, name, description, price, image_url, is_available, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-    const transaction = this.db.transaction((items: Product[]) => {
-      for (const item of items) upsert.run(
-        item.id, 
-        item.category_id, 
-        item.name, 
-        item.description, 
-        item.price, 
-        item.image_url, 
-        item.is_available ? 1 : 0,
-        item.type || 'simple'
-      );
+    const tx = this.db.transaction((items: Product[]) => {
+      this.db.prepare('DELETE FROM local_products').run();
+      for (const item of items) upsert.run(item.id, item.category_id, item.name, item.description, item.price, item.image_url, item.is_available ? 1 : 0, item.type || 'simple');
     });
-    transaction(data as unknown as Product[]);
+    tx(data as unknown as Product[]);
   }
 
   private async syncProductVariations() {
-    console.log('  ↳ Sync Variations...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await this.supabase.from('product_variations').select('*');
-    if (error) throw new Error(`ERREUR ProductVariations: ${JSON.stringify(error)}`);
-
+    if (error) throw error;
     if (!data) return;
+    const rows = this.db.prepare('SELECT id FROM local_products').all() as { id: string }[];
+    const validProductIds = new Set(rows.map(r => r.id));
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_variations (id, product_id, name, price, is_available, sort_order) VALUES (?, ?, ?, ?, ?, ?)`);
-    const transaction = this.db.transaction((items: ProductVariation[]) => {
-      for (const item of items) upsert.run(item.id, item.product_id, item.name, item.price, item.is_available ? 1 : 0, item.sort_order);
+    const tx = this.db.transaction((items: ProductVariation[]) => {
+      this.db.prepare('DELETE FROM local_product_variations').run();
+      for (const item of items) {
+        if (item.product_id && validProductIds.has(item.product_id)) upsert.run(item.id, item.product_id, item.name, item.price, item.is_available ? 1 : 0, item.sort_order);
+      }
     });
-    transaction(data as unknown as ProductVariation[]);
+    tx(data as unknown as ProductVariation[]);
   }
 
   private async syncProductOptionLinks() {
-    console.log('  ↳ Sync Links...');
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data, error } = await this.supabase.from('product_option_links').select('*');
-    if (error) throw new Error(`ERREUR ProductOptionLinks: ${JSON.stringify(error)}`);
-
+    if (error) throw error;
     if (!data) return;
+    const rows = this.db.prepare('SELECT id FROM local_products').all() as { id: string }[];
+    const validProductIds = new Set(rows.map(r => r.id));
     const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_option_links (product_id, group_id, sort_order) VALUES (?, ?, ?)`);
-    const transaction = this.db.transaction((items: ProductOptionLink[]) => {
+    const tx = this.db.transaction((items: ProductOptionLink[]) => {
       this.db.prepare('DELETE FROM local_product_option_links').run();
-      for (const item of items) upsert.run(item.product_id, item.group_id, item.sort_order);
+      for (const item of items) {
+        if (validProductIds.has(item.product_id)) upsert.run(item.product_id, item.group_id, item.sort_order);
+      }
     });
-    transaction(data as unknown as ProductOptionLink[]);
+    tx(data as unknown as ProductOptionLink[]);
   }
 }
