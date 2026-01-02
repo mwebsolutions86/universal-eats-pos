@@ -1,266 +1,242 @@
 import * as React from 'react';
-import { Product, ProductVariation, OptionGroupWithItems, OptionItem } from '../types';
-import { X, Minus, Plus, ShoppingCart, CheckCircle2, Circle } from 'lucide-react';
+import { Order, OrderItem } from '../types';
+import { X, Printer, User, Clock, CreditCard, ChefHat, Bike, CheckCircle2, MapPin } from 'lucide-react';
+import { getStatusBadge } from './OrderUI';
 
-const { useState, useEffect } = React;
-
-interface ProductDetailsModalProps {
-  product: Product;
+interface OrderDetailsModalProps {
+  order: Order;
   onClose: () => void;
-  onAddToCart: (product: Product, variation?: ProductVariation, qty?: number, options?: OptionItem[]) => void;
+  onUpdateStatus: (status: string) => void;
 }
 
-const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ product, onClose, onAddToCart }) => {
-  // --- ETATS ---
-  const [variations, setVariations] = useState<ProductVariation[]>([]);
-  const [selectedVariation, setSelectedVariation] = useState<ProductVariation | null>(null);
-  
-  const [optionGroups, setOptionGroups] = useState<OptionGroupWithItems[]>([]);
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, OptionItem[]>>({}); // Key: GroupID
+const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateStatus }) => {
+  // Calculs simples
+  const subtotal = order.total_amount; 
 
-  const [qty, setQty] = useState(1);
-  const [loading, setLoading] = useState(true);
-
-  // --- CHARGEMENT ---
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      try {
-        // 1. Charger Variations
-        const vars = await window.electronAPI.db.getProductVariations(product.id);
-        setVariations(vars);
-        if (vars.length > 0) setSelectedVariation(vars[0]);
-
-        // 2. Charger Options (Suppléments)
-        const groups = await window.electronAPI.db.getProductOptions(product.id);
-        setOptionGroups(groups);
-        
-        // Pré-sélection par défaut
-        const initialOptions: Record<string, OptionItem[]> = {};
-        setSelectedOptions(initialOptions);
-
-      } catch (e) {
-        console.error("Erreur chargement détails produit", e);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
-  }, [product]);
-
-  // --- LOGIQUE PRIX ---
-  const basePrice = selectedVariation ? selectedVariation.price : product.price;
-  
-  // ✅ CORRECTION 1 : Sécurisation du prix (item.price || 0)
-  const optionsPrice = Object.values(selectedOptions).flat().reduce((acc, item) => acc + (item.price || 0), 0);
-  
-  const unitPrice = basePrice + optionsPrice;
-  const totalPrice = unitPrice * qty;
-
-  // --- HANDLERS ---
-  const handleOptionToggle = (group: OptionGroupWithItems, item: OptionItem) => {
-    setSelectedOptions(prev => {
-      const currentSelection = prev[group.id] || [];
-      const isSelected = currentSelection.find(i => i.id === item.id);
-
-      // CAS 1 : Radio (1 choix max)
-      // ✅ CORRECTION 2 : Sécurisation min/max selection
-      const maxSel = group.max_selection || 0;
-      const minSel = group.min_selection || 0;
-
-      if (maxSel === 1) {
-        // Si c'est déjà sélectionné et que min_selection est 0, on peut désélectionner
-        if (isSelected && minSel === 0) {
-            const newState = { ...prev };
-            delete newState[group.id];
-            return newState;
-        }
-        // Sinon on remplace
-        return { ...prev, [group.id]: [item] };
-      }
-
-      // CAS 2 : Checkbox (Multi choix)
-      if (isSelected) {
-        return { ...prev, [group.id]: currentSelection.filter(i => i.id !== item.id) };
-      } else {
-        // Vérifier max selection
-        if (maxSel > 0 && currentSelection.length >= maxSel) {
-          return prev; 
-        }
-        return { ...prev, [group.id]: [...currentSelection, item] };
-      }
-    });
-  };
-
-  const validateSelection = () => {
-    for (const group of optionGroups) {
-      const selection = selectedOptions[group.id] || [];
-      const minSel = group.min_selection || 0;
-      if (minSel > 0 && selection.length < minSel) {
-        alert(`Veuillez sélectionner au moins ${minSel} option(s) pour "${group.name}"`);
-        return false;
-      }
+  const getNextActions = () => {
+    switch(order.status) {
+      case 'pending': return [{ label: 'Valider & Cuisine', status: 'preparing', color: 'bg-blue-600 hover:bg-blue-700' }];
+      case 'confirmed': return [{ label: 'Lancer Cuisine', status: 'preparing', color: 'bg-orange-600 hover:bg-orange-700' }];
+      case 'preparing': return [{ label: 'Commande Prête', status: 'ready', color: 'bg-green-600 hover:bg-green-700' }];
+      case 'ready': 
+        return order.order_type === 'delivery' 
+          ? [{ label: 'Partir en Livraison', status: 'out_for_delivery', color: 'bg-purple-600 hover:bg-purple-700' }]
+          : [{ label: 'Remettre au Client', status: 'delivered', color: 'bg-gray-800 hover:bg-gray-900' }];
+      case 'out_for_delivery': return [{ label: 'Confirmer Livraison', status: 'delivered', color: 'bg-gray-800 hover:bg-gray-900' }];
+      default: return [];
     }
-    return true;
   };
 
-  const handleConfirm = () => {
-    if (!validateSelection()) return;
-    const allSelectedOptions = Object.values(selectedOptions).flat();
-    onAddToCart(product, selectedVariation || undefined, qty, allSelectedOptions);
-    onClose();
+  // Fonction helper pour afficher les options (JSON ou Objet)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const renderOptions = (options: any) => {
+    if (!options) return null;
+
+    let parsedOpts = options;
+    // Si c'est une string JSON (cas fréquent avec SQLite), on parse
+    if (typeof options === 'string') {
+        try { parsedOpts = JSON.parse(options); } catch { return null; }
+    }
+
+    // Cas 1 : Format "CartItem" complet sauvegardé (variation + options)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const list: any[] = [];
+    
+    // Si on a une variation stockée
+    if (parsedOpts.variation) {
+        list.push(<div key="var" className="text-xs text-slate-500 font-bold">📏 {parsedOpts.variation.name}</div>);
+    }
+
+    // Si on a des options (suppléments) stockés dans "options" ou si parsedOpts est lui-même un tableau
+    const supplements = Array.isArray(parsedOpts) ? parsedOpts : (parsedOpts.options || []);
+    
+    if (Array.isArray(supplements) && supplements.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        supplements.forEach((opt: any, i: number) => {
+             list.push(
+                 <div key={`opt-${i}`} className="text-xs text-slate-500">
+                    + {opt.name} {opt.price > 0 && `(${Number(opt.price).toFixed(0)} DH)`}
+                 </div>
+             );
+        });
+    }
+
+    return list.length > 0 ? <div className="mt-1 pl-2 border-l-2 border-slate-100">{list}</div> : null;
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200 font-sans">
-      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col md:flex-row h-[85vh] md:h-[600px]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 font-sans">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-300">
         
-        {/* COLONNE GAUCHE : IMAGE */}
-        <div className="w-full md:w-5/12 bg-slate-100 dark:bg-slate-950 relative shrink-0">
-          {product.image_url ? (
-            <img src={product.image_url} alt={product.name} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center text-8xl opacity-10">🍔</div>
-          )}
-          <button onClick={onClose} className="absolute top-4 left-4 bg-white/90 p-2 rounded-full text-slate-800 hover:bg-white md:hidden shadow-sm z-10">
-            <X size={20}/>
-          </button>
-        </div>
-
-        {/* COLONNE DROITE : DETAILS & OPTIONS */}
-        <div className="w-full md:w-7/12 flex flex-col bg-white dark:bg-slate-900 min-w-0">
-          
-          <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-start shrink-0">
-             <div>
-                <h2 className="text-2xl font-black text-slate-900 dark:text-white leading-tight mb-1">{product.name}</h2>
-                <p className="text-slate-500 dark:text-slate-400 text-sm line-clamp-2">{product.description || "Aucune description."}</p>
-             </div>
-             <button onClick={onClose} className="hidden md:block text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
-               <X size={28}/>
-             </button>
-          </div>
-            
-          <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-            {loading ? (
-                <div className="flex justify-center py-10"><span className="animate-spin text-2xl">⏳</span></div>
-            ) : (
-                <div className="space-y-8">
-                    
-                    {/* SECTION VARIATIONS */}
-                    {variations.length > 0 && (
-                        <div>
-                            <h3 className="font-bold text-xs text-slate-400 uppercase mb-3 tracking-wider flex items-center gap-2">
-                                📏 Taille / Variation <span className="text-red-500">*</span>
-                            </h3>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                {variations.map(v => (
-                                    <div 
-                                        key={v.id} 
-                                        onClick={() => setSelectedVariation(v)}
-                                        className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all active:scale-[0.98] ${
-                                            selectedVariation?.id === v.id 
-                                            ? 'border-primary bg-orange-50 dark:bg-orange-900/20 dark:border-primary' 
-                                            : 'border-slate-100 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-600'
-                                        }`}
-                                    >
-                                        <div className="flex items-center gap-3">
-                                            <div className={`w-5 h-5 rounded-full border-[1.5px] flex items-center justify-center shrink-0 ${
-                                                selectedVariation?.id === v.id ? 'border-primary' : 'border-slate-300 dark:border-slate-600'
-                                            }`}>
-                                                {selectedVariation?.id === v.id && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
-                                            </div>
-                                            <span className={`font-bold text-sm ${selectedVariation?.id === v.id ? 'text-primary' : 'text-slate-700 dark:text-slate-300'}`}>
-                                                {v.name}
-                                            </span>
-                                        </div>
-                                        <span className="font-black text-sm text-slate-900 dark:text-white">
-                                            {v.price.toFixed(0)} <span className="text-[10px] font-normal text-slate-400">DH</span>
-                                        </span>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* SECTION OPTIONS (CORRIGÉE) */}
-                    {optionGroups.map(group => (
-                        <div key={group.id}>
-                            <div className="flex items-center justify-between mb-3">
-                                <h3 className="font-bold text-xs text-slate-400 uppercase tracking-wider flex items-center gap-2">
-                                    ✨ {group.name}
-                                </h3>
-                                {/* ✅ CORRECTION 3 : Sécurisation affichage min/max */}
-                                <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500">
-                                    {(group.min_selection || 0) > 0 ? `Min ${group.min_selection}` : 'Optionnel'} 
-                                    {group.max_selection ? ` / Max ${group.max_selection}` : ''}
-                                </span>
-                            </div>
-                            
-                            <div className="space-y-2">
-                                {group.items.map(item => {
-                                    const isSelected = (selectedOptions[group.id] || []).some(i => i.id === item.id);
-                                    return (
-                                        <div 
-                                            key={item.id}
-                                            onClick={() => handleOptionToggle(group, item)}
-                                            className={`flex items-center justify-between p-3 rounded-lg border cursor-pointer transition-all active:scale-[0.99] ${
-                                                isSelected 
-                                                ? 'bg-blue-50 border-blue-200 dark:bg-blue-900/20 dark:border-blue-800' 
-                                                : 'bg-white dark:bg-slate-900 border-slate-100 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                                            }`}
-                                        >
-                                            <div className="flex items-center gap-3">
-                                                {isSelected 
-                                                    ? <CheckCircle2 size={20} className="text-blue-500 fill-current" /> 
-                                                    : <Circle size={20} className="text-slate-300 dark:text-slate-600" />
-                                                }
-                                                <span className={`text-sm font-medium ${isSelected ? 'text-blue-700 dark:text-blue-300' : 'text-slate-700 dark:text-slate-300'}`}>
-                                                    {item.name}
-                                                </span>
-                                            </div>
-                                            {/* ✅ CORRECTION 4 : Sécurisation affichage prix */}
-                                            {(item.price || 0) > 0 && (
-                                                <span className="font-bold text-sm text-slate-900 dark:text-white">
-                                                    +{(item.price || 0).toFixed(0)} <span className="text-[10px] font-normal text-slate-400">DH</span>
-                                                </span>
-                                            )}
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                    ))}
-
-                </div>
-            )}
-          </div>
-
-          <div className="p-6 border-t border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 shrink-0">
-            <div className="flex items-center justify-between mb-4">
-               <div className="flex items-center bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl shadow-sm">
-                  <button onClick={() => setQty(Math.max(1, qty - 1))} className="w-12 h-12 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-700 rounded-l-xl text-slate-600 dark:text-slate-300"><Minus size={18}/></button>
-                  <span className="w-10 text-center font-bold text-lg text-slate-900 dark:text-white">{qty}</span>
-                  <button onClick={() => setQty(qty + 1)} className="w-12 h-12 flex items-center justify-center hover:bg-slate-50 dark:hover:bg-slate-700 rounded-r-xl text-slate-600 dark:text-slate-300"><Plus size={18}/></button>
-               </div>
-               <div className="text-right">
-                  <p className="text-xs text-slate-400 font-bold uppercase tracking-wider mb-1">Total estimé</p>
-                  <p className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">{totalPrice.toFixed(2)} <span className="text-lg text-slate-400 font-normal">DH</span></p>
-               </div>
+        {/* HEADER */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-900">
+          <div className="flex items-center gap-3">
+            <div className="bg-white dark:bg-slate-800 p-2 rounded-lg border border-gray-200 dark:border-slate-700 shadow-sm">
+              <span className="font-mono font-black text-xl text-gray-800 dark:text-white">#{order.order_number}</span>
             </div>
-            
-            <button 
-                onClick={handleConfirm}
-                disabled={loading}
-                className="w-full py-4 bg-primary text-white rounded-xl font-bold text-lg flex items-center justify-center gap-2 hover:bg-orange-600 transition-all shadow-lg shadow-orange-500/20 active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-                <ShoppingCart size={22} className="fill-current/20" />
-                AJOUTER LA COMMANDE
+            <div className="flex flex-col">
+              <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Commande</span>
+              <div className="flex items-center gap-2">
+                {getStatusBadge(order.status)}
+                <span className="text-xs text-gray-400">• {new Date(order.created_at).toLocaleString()}</span>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button className="p-2 text-gray-500 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-full transition-colors" title="Imprimer">
+              <Printer size={20} />
+            </button>
+            <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-full transition-colors">
+              <X size={24} />
             </button>
           </div>
         </div>
+
+        <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-950">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            
+            {/* COLONNE GAUCHE : ITEMS */}
+            <div className="lg:col-span-2 space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wide mb-4 flex items-center gap-2">
+                  <ChefHat size={16} /> Détails de la commande
+                </h3>
+                <div className="bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
+                  <table className="w-full text-left text-sm">
+                    <thead className="bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 font-medium">
+                      <tr>
+                        <th className="px-4 py-3">Produit</th>
+                        <th className="px-4 py-3 text-center">Qté</th>
+                        <th className="px-4 py-3 text-right">Prix U.</th>
+                        <th className="px-4 py-3 text-right">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
+                      {order.items?.map((item: OrderItem, idx: number) => (
+                          <tr key={idx}>
+                            <td className="px-4 py-3">
+                              <span className="font-bold text-gray-800 dark:text-white">{item.product_name}</span>
+                              {/* Rendu intelligent des options/variations */}
+                              {renderOptions(item.options)}
+                            </td>
+                            <td className="px-4 py-3 text-center font-medium bg-white/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300">
+                                {item.quantity}
+                            </td>
+                            <td className="px-4 py-3 text-right text-gray-500 dark:text-slate-400">
+                                {item.unit_price.toFixed(2)}
+                            </td>
+                            <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
+                                {item.total_price.toFixed(2)}
+                            </td>
+                          </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Résumé Financier */}
+              <div className="flex justify-end">
+                <div className="w-64 bg-gray-50 dark:bg-slate-900 rounded-xl p-4 space-y-2 border border-gray-100 dark:border-slate-800">
+                  <div className="flex justify-between text-sm text-gray-600 dark:text-slate-400">
+                    <span>Sous-total</span>
+                    <span>{subtotal.toFixed(2)} DH</span>
+                  </div>
+                  <div className="flex justify-between text-sm text-gray-600 dark:text-slate-400">
+                    <span>Livraison</span>
+                    <span>0.00 DH</span>
+                  </div>
+                  <div className="pt-2 border-t border-gray-200 dark:border-slate-700 flex justify-between items-center">
+                    <span className="font-bold text-gray-900 dark:text-white">Total à payer</span>
+                    <span className="font-black text-xl text-blue-600">{order.total_amount.toFixed(2)} <span className="text-xs">DH</span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* COLONNE DROITE : CLIENT & INFO */}
+            <div className="space-y-6">
+              
+              {/* Carte Client */}
+              <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
+                <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
+                  <User size={14} /> Client
+                </h3>
+                <div className="flex items-start gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-lg">
+                    {(order.customer_name || 'A')[0]}
+                  </div>
+                  <div>
+                    <p className="font-bold text-gray-900 dark:text-white">{order.customer_name || 'Client de passage'}</p>
+                    <p className="text-sm text-gray-500">{order.customer_phone || 'Pas de téléphone'}</p>
+                  </div>
+                </div>
+                
+                {order.order_type === 'delivery' && (
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-sm text-blue-800 dark:text-blue-300 flex gap-2 items-start">
+                    <MapPin size={16} className="shrink-0 mt-0.5" />
+                    <span className="font-medium">{order.delivery_address || 'Adresse non renseignée'}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Info Paiement & Type */}
+              <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
+                <div>
+                  <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-2">
+                    <CreditCard size={14} /> Paiement
+                  </h3>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">Méthode</span>
+                    <span className="text-sm font-bold uppercase bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
+                      {order.payment_method || 'Espèces'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center mt-2">
+                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">Statut</span>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${order.payment_status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
+                      {order.payment_status === 'paid' ? 'PAYÉ' : 'EN ATTENTE'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-gray-100 dark:border-slate-800">
+                   <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-2">
+                    <Clock size={14} /> Type
+                  </h3>
+                  <div className="w-full bg-gray-50 dark:bg-slate-800 rounded-lg p-2 text-center font-bold text-gray-700 dark:text-white border border-gray-200 dark:border-slate-700 flex items-center justify-center gap-2">
+                    {order.order_type === 'delivery' ? <Bike size={16}/> : order.order_type === 'takeaway' ? <CheckCircle2 size={16}/> : <ChefHat size={16}/>}
+                    {order.order_type === 'delivery' ? 'LIVRAISON' : order.order_type === 'takeaway' ? 'À EMPORTER' : 'SUR PLACE'}
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+
+        {/* FOOTER ACTIONS */}
+        <div className="p-4 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 flex justify-between items-center">
+          <button onClick={() => onUpdateStatus('cancelled')} className="px-4 py-2 text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm">
+            Annuler la commande
+          </button>
+          
+          <div className="flex gap-3">
+            {getNextActions().map((action, i) => (
+              <button
+                key={i}
+                onClick={() => onUpdateStatus(action.status)}
+                className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg shadow-blue-500/20 active:scale-95 transition-all ${action.color}`}
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
       </div>
     </div>
   );
 };
 
-export default ProductDetailsModal;
+export default OrderDetailsModal;
