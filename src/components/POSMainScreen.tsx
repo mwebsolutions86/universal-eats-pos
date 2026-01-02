@@ -1,9 +1,9 @@
 import * as React from 'react';
-import { StaffMember, Category, Product, ProductVariation, OrderType, POSSession, CartItem, Customer } from '../types';
+import { StaffMember, Category, Product, ProductVariation, OrderType, POSSession, CartItem, Customer, OptionItem } from '../types';
 import ProductDetailsModal from './ProductDetailsModal';
 import CustomerModal from './CustomerModal';
 import PaymentModal from './PaymentModal';
-import { Trash2, User, ChevronRight, Loader2 } from 'lucide-react';
+import { Trash2, User, ChevronRight, Loader2, Edit2 } from 'lucide-react';
 
 const { useState, useEffect } = React;
 
@@ -25,7 +25,10 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
   const [orderType, setOrderType] = useState<OrderType>('dine_in');
   const [currentCustomer, setCurrentCustomer] = useState<Customer | null>(null);
 
+  // Gestion MODAL PRODUIT
   const [productToConfigure, setProductToConfigure] = useState<Product | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
@@ -43,29 +46,20 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
   const loadInitialData = async () => {
     try {
       let cats = await window.electronAPI.db.getCategories();
-      
-      // Synchro auto si vide
       if (cats.length === 0) {
-        console.log("⚠️ Base locale vide. Lancement de la synchronisation initiale...");
         setIsSyncing(true);
         try {
-          const result = await window.electronAPI.db.syncFullPull();
-          if (result.success) {
-            cats = await window.electronAPI.db.getCategories();
-          } else {
-            alert("Erreur de synchronisation : " + result.error);
-          }
+          await window.electronAPI.db.syncFullPull();
+          cats = await window.electronAPI.db.getCategories();
         } catch (syncErr) {
           console.error("❌ Erreur critique synchro:", syncErr);
         } finally {
           setIsSyncing(false);
         }
       }
-
       setCategories(cats);
       if (cats.length > 0) {
-          const firstCatId = cats[0].id;
-          setSelectedCategory(firstCatId);
+          setSelectedCategory(cats[0].id);
       }
     } catch (e) {
       console.error("Erreur chargement:", e);
@@ -81,19 +75,36 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
   };
 
   // --- LOGIQUE PANIER ---
+  
   const handleProductClick = (product: Product) => {
+    setEditingIndex(null);
     if (product.price === 0 || product.type === 'variable' || product.type === 'combo') {
       setProductToConfigure(product);
     } else {
-      addToCart(product);
+      handleProductSave(product, undefined, 1, []);
     }
   };
 
-  const addToCart = (product: Product, variation?: ProductVariation, qty = 1) => {
+  const handleEditCartItem = (index: number) => {
+    const item = cart[index];
+    setEditingIndex(index);
+    setProductToConfigure(item.product);
+  };
+
+  const handleProductSave = (product: Product, variation?: ProductVariation, qty = 1, options: OptionItem[] = []) => {
     setCart(prev => {
-      const itemId = variation ? `${product.id}-${variation.id}` : product.id;
+      if (editingIndex !== null) {
+        const newCart = [...prev];
+        newCart[editingIndex] = { product, variation, qty, options };
+        return newCart;
+      }
+
+      const optionIds = options.map(o => o.id).sort().join('-');
+      const itemId = `${product.id}-${variation?.id || 'base'}-${optionIds}`;
+
       const existingIndex = prev.findIndex(item => {
-        const currentItemId = item.variation ? `${item.product.id}-${item.variation.id}` : item.product.id;
+        const currentOptionIds = (item.options || []).map(o => o.id).sort().join('-');
+        const currentItemId = `${item.product.id}-${item.variation?.id || 'base'}-${currentOptionIds}`;
         return currentItemId === itemId;
       });
 
@@ -102,9 +113,11 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         newCart[existingIndex].qty += qty;
         return newCart;
       }
-      return [...prev, { product, variation, qty }];
+      return [...prev, { product, variation, qty, options }];
     });
+
     setProductToConfigure(null);
+    setEditingIndex(null);
   };
 
   const removeFromCart = (index: number) => {
@@ -112,8 +125,9 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
   };
 
   const cartTotal = cart.reduce((sum, item) => {
-    const price = item.variation ? item.variation.price : item.product.price;
-    return sum + (price * item.qty);
+    const base = item.variation ? item.variation.price : item.product.price;
+    const opts = (item.options || []).reduce((acc, opt) => acc + (opt.price || 0), 0);
+    return sum + ((base + opts) * item.qty);
   }, 0);
 
   const handlePayment = async (method: 'cash' | 'card', amountReceived: number) => {
@@ -152,11 +166,10 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
     );
   }
 
-  // ✅ CORRECTION MAJEURE ICI : Z-INDEX ET RELATIVE POSITIONING
   return (
     <div className="flex h-full w-full bg-slate-100 dark:bg-slate-950 overflow-hidden font-sans relative isolate">
       
-      {/* 1. COLONNE CATÉGORIES (GAUCHE) - Z-INDEX BOOSTÉ À 50 */}
+      {/* 1. GAUCHE: CATEGORIES */}
       <div className="w-28 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col items-center py-4 overflow-y-auto hide-scrollbar z-50 shadow-lg shrink-0">
         {categories.map(cat => (
           <button 
@@ -179,9 +192,8 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         ))}
       </div>
 
-      {/* 2. GRILLE PRODUITS (CENTRE) - Z-INDEX CONTRÔLÉ */}
+      {/* 2. CENTRE: GRILLE PRODUITS */}
       <div className="flex-1 flex flex-col h-full min-w-0 bg-slate-100 dark:bg-slate-950 relative z-0">
-        {/* Topbar POS - Z-INDEX 40 (Au-dessus des produits mais sous les modales) */}
         <div className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 shadow-sm z-40 relative">
             <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
                 <OrderModeButton active={orderType === 'dine_in'} label="Sur Place" icon="🍽️" onClick={() => setOrderType('dine_in')} />
@@ -201,7 +213,6 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
             </button>
         </div>
 
-        {/* Grille - Z-INDEX 0 */}
         <div className="flex-1 p-4 overflow-y-auto custom-scrollbar relative z-0">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
             {products.length === 0 && (
@@ -217,7 +228,7 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         </div>
       </div>
 
-      {/* 3. PANIER (DROITE) - Z-INDEX BOOSTÉ À 50 */}
+      {/* 3. DROITE: PANIER */}
       <div className="w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-50 shrink-0 relative">
         <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 z-10">
             <h3 className="font-bold text-lg text-slate-800 dark:text-white">Panier</h3>
@@ -234,27 +245,51 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
                     <p>Votre panier est vide</p>
                 </div>
             )}
-            {cart.map((item, idx) => (
+            {cart.map((item, idx) => {
+                const itemTotal = (item.variation ? item.variation.price : item.product.price) + (item.options || []).reduce((acc, o) => acc + (o.price || 0), 0);
+                
+                return (
                 <div key={idx} className="flex justify-between items-start bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm group hover:border-primary/50 transition-colors">
-                    <div className="flex items-start gap-3">
-                        <div className="w-6 h-6 bg-slate-900 text-white rounded-md flex items-center justify-center font-bold text-xs">
+                    <div className="flex items-start gap-3 overflow-hidden">
+                        <div className="w-6 h-6 bg-slate-900 text-white rounded-md flex items-center justify-center font-bold text-xs shrink-0 mt-0.5">
                             {item.qty}
                         </div>
-                        <div>
-                            <p className="font-bold text-slate-800 dark:text-slate-100 text-sm">{item.product.name}</p>
-                            {item.variation && <p className="text-xs text-slate-500">+ {item.variation.name}</p>}
+                        <div className="min-w-0">
+                            <p className="font-bold text-slate-800 dark:text-slate-100 text-sm truncate">{item.product.name}</p>
+                            {item.variation && <p className="text-xs text-slate-500">📏 {item.variation.name}</p>}
+                            {item.options && item.options.length > 0 && (
+                                <p className="text-[10px] text-slate-400 leading-tight mt-1 line-clamp-2">
+                                    + {item.options.map(o => o.name).join(', ')}
+                                </p>
+                            )}
                         </div>
                     </div>
-                    <div className="text-right flex flex-col items-end">
+                    
+                    <div className="text-right flex flex-col items-end shrink-0 ml-2">
                         <p className="font-bold text-sm text-slate-900 dark:text-white">
-                            {((item.variation ? item.variation.price : item.product.price) * item.qty).toFixed(2)}
+                            {(itemTotal * item.qty).toFixed(2)}
                         </p>
-                        <button onClick={() => removeFromCart(idx)} className="text-slate-300 hover:text-red-500 transition-colors mt-1">
-                            <Trash2 size={14} />
-                        </button>
+                        
+                        {/* ✅ BOUTONS TACTILES LARGES & TOUJOURS VISIBLES */}
+                        <div className="flex gap-2 mt-2">
+                            {/* BOUTON MODIFIER */}
+                            <button 
+                                onClick={() => handleEditCartItem(idx)}
+                                className="w-10 h-10 flex items-center justify-center rounded-lg bg-blue-100 text-blue-700 hover:bg-blue-200 active:scale-95 transition-all"
+                            >
+                                <Edit2 size={18} />
+                            </button>
+                            {/* BOUTON SUPPRIMER */}
+                            <button 
+                                onClick={() => removeFromCart(idx)} 
+                                className="w-10 h-10 flex items-center justify-center rounded-lg bg-red-100 text-red-600 hover:bg-red-200 active:scale-95 transition-all"
+                            >
+                                <Trash2 size={18} />
+                            </button>
+                        </div>
                     </div>
                 </div>
-            ))}
+            )})}
         </div>
 
         {/* Footer Total */}
@@ -276,8 +311,19 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         </div>
       </div>
 
-      {/* MODALES - Z-INDEX TRÈS HAUT (Géré généralement par le composant Modal lui-même, mais on s'assure qu'elles sont rendues) */}
-      {productToConfigure && <ProductDetailsModal product={productToConfigure} onClose={() => setProductToConfigure(null)} onAddToCart={addToCart} />}
+      {/* MODALES */}
+      {productToConfigure && (
+        <ProductDetailsModal 
+            product={productToConfigure} 
+            initialValues={editingIndex !== null ? cart[editingIndex] : undefined}
+            onClose={() => {
+                setProductToConfigure(null);
+                setEditingIndex(null);
+            }} 
+            onAddToCart={handleProductSave}
+        />
+      )}
+      
       {showCustomerModal && <CustomerModal onClose={() => setShowCustomerModal(false)} onSelectCustomer={(c) => { setCurrentCustomer(c); setShowCustomerModal(false); }} />}
       {showPaymentModal && <PaymentModal total={cartTotal} onClose={() => setShowPaymentModal(false)} onConfirm={handlePayment} />}
     </div>

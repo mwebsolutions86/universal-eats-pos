@@ -84,6 +84,11 @@ export interface OptionItem {
   is_available: boolean | null;
 }
 
+// ✅ AJOUT : Type combiné pour le front-end
+export interface OptionGroupWithItems extends OptionGroup {
+  items: OptionItem[];
+}
+
 // --- Commandes & Panier ---
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'phone';
@@ -92,6 +97,7 @@ export interface CartItem {
   product: Product;
   variation?: ProductVariation;
   qty: number;
+  options?: OptionItem[]; // ✅ AJOUT : Support des options dans le panier
 }
 
 export interface Order {
@@ -130,15 +136,15 @@ export interface IElectronAPI {
     checkStaffPin: (pin: string) => Promise<StaffMember | null>;
     getStaffList: () => Promise<StaffMember[]>;
     
-    // Synchro Globale
     syncFullPull: () => Promise<{ success: boolean; error?: string }>;
-    
-    // ✅ Synchro Commandes Live (Web/App)
     syncLiveOrders: () => Promise<{ success: boolean; count?: number; error?: string }>;
 
     getCategories: () => Promise<Category[]>;
     getProductsByCategory: (categoryId: string) => Promise<Product[]>;
     getProductVariations: (productId: string) => Promise<ProductVariation[]>;
+    
+    // ✅ AJOUT : Méthode manquante pour récupérer les options
+    getProductOptions: (productId: string) => Promise<OptionGroupWithItems[]>;
     
     getLiveOrders: () => Promise<Order[]>;
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;

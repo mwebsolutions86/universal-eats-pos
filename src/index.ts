@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import { config } from 'dotenv';
 config();
@@ -30,7 +31,6 @@ try {
   console.error('❌ Erreur lors de l\'initialisation du service de synchronisation:', error);
   const errorMessage = error instanceof Error ? error.message : String(error);
   console.error('Détails:', errorMessage);
-  // Ne pas quitter, continuer sans sync
   syncService = null as any;
 }
 
@@ -45,7 +45,7 @@ const createWindow = () => {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       nodeIntegration: false,
       contextIsolation: true,
-      webSecurity: false // Désactivé pour les images locales/externes
+      webSecurity: false 
     },
   });
 
@@ -56,7 +56,6 @@ const createWindow = () => {
 };
 
 app.on('ready', () => {
-  // --- CSP FIX ---
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -70,7 +69,6 @@ app.on('ready', () => {
 
   // --- HANDLERS BASE DE DONNEES ---
 
-  // Auth
   ipcMain.handle('db:check-staff-pin', async (_event, pin) => {
     return db.prepare('SELECT * FROM local_staff_cache WHERE pos_pin = ?').get(pin);
   });
@@ -79,7 +77,6 @@ app.on('ready', () => {
     return db.prepare('SELECT * FROM local_staff_cache').all();
   });
 
-  // Sync Global
   ipcMain.handle('db:sync-full-pull', async () => {
     try {
       return await syncService.syncAll();
@@ -89,7 +86,6 @@ app.on('ready', () => {
     }
   });
 
-  // ✅ AJOUT : Sync Orders Only (Polling)
   ipcMain.handle('db:sync-live-orders', async () => {
     try {
       return await syncService.syncLiveOrders();
@@ -110,6 +106,34 @@ app.on('ready', () => {
   
   ipcMain.handle('db:get-product-variations', async (_event, productId) => {
     return db.prepare('SELECT * FROM local_product_variations WHERE product_id = ? ORDER BY sort_order ASC').all(productId);
+  });
+
+  // ✅ AJOUT : Récupération des options (Le code manquant)
+  ipcMain.handle('db:get-product-options', async (_event, productId) => {
+    try {
+      // 1. Récupérer les groupes liés via la table de liaison
+      const groups = db.prepare(`
+        SELECT g.* FROM local_option_groups g
+        JOIN local_product_option_links l ON l.group_id = g.id
+        WHERE l.product_id = ?
+        ORDER BY l.sort_order ASC
+      `).all(productId);
+
+      // 2. Pour chaque groupe, récupérer les items
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const groupsWithItems = groups.map((group: any) => {
+        const items = db.prepare(`
+          SELECT * FROM local_option_items 
+          WHERE group_id = ? AND is_available = 1
+        `).all(group.id);
+        return { ...group, items };
+      });
+
+      return groupsWithItems;
+    } catch (e) {
+      console.error("❌ Erreur db:get-product-options:", e);
+      return [];
+    }
   });
 
   // CRM
@@ -139,7 +163,6 @@ app.on('ready', () => {
 
   // Transactionnel (POS)
   ipcMain.handle('db:create-order', async (_event, orderData) => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (db as any).createOrder(orderData);
   });
 

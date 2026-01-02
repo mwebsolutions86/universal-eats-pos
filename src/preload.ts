@@ -11,13 +11,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     
     // --- SYNC ---
     syncFullPull: () => ipcRenderer.invoke('db:sync-full-pull'),
-    // ✅ Nouvelle méthode exposée
     syncLiveOrders: () => ipcRenderer.invoke('db:sync-live-orders'),
     
     // --- CATALOGUE ---
     getCategories: () => ipcRenderer.invoke('db:get-categories'),
     getProductsByCategory: (categoryId: string) => ipcRenderer.invoke('db:get-products-by-category', categoryId),
     getProductVariations: (productId: string) => ipcRenderer.invoke('db:get-product-variations', productId),
+    
+    // ✅ AJOUT : Exposer la méthode options
+    getProductOptions: (productId: string) => ipcRenderer.invoke('db:get-product-options', productId),
 
     // --- CRM CLIENTS ---
     searchCustomers: (query: string) => ipcRenderer.invoke('db:search-customers', query),
@@ -37,7 +39,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- SYSTÈME ---
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onNetworkStatusChange: (callback: (status: boolean) => void) => {
-    // Placeholder pour la gestion online/offline future
     callback(true);
   }
 });
