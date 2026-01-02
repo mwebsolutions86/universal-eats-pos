@@ -106,6 +106,9 @@ export interface Order {
   total_amount: number;
   status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled' | 'out_for_delivery';
   payment_status: 'pending' | 'paid';
+  payment_method?: string | null;
+  amount_received?: number | null;
+  amount_returned?: number | null;
   channel: 'web' | 'app' | 'pos';
   created_at: string;
   items?: OrderItem[];

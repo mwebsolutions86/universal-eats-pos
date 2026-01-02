@@ -10,12 +10,29 @@ import { SyncService } from './services/sync.service';
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
+console.log('🚀 Démarrage de l\'application Electron...');
+
 if (require('electron-squirrel-startup')) {
+  console.log('🐿️ Squirrel startup détecté, arrêt.');
   app.quit();
 }
 
+console.log('📊 Initialisation de la base de données...');
 const db = initLocalDatabase();
-const syncService = new SyncService(db);
+console.log('✅ Base de données initialisée.');
+
+console.log('🔄 Initialisation du service de synchronisation...');
+let syncService: SyncService;
+try {
+  syncService = new SyncService(db);
+  console.log('✅ Service de synchronisation initialisé.');
+} catch (error: unknown) {
+  console.error('❌ Erreur lors de l\'initialisation du service de synchronisation:', error);
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  console.error('Détails:', errorMessage);
+  // Ne pas quitter, continuer sans sync
+  syncService = null as any;
+}
 
 const createWindow = () => {
   const mainWindow = new BrowserWindow({
