@@ -3,7 +3,7 @@ import { StaffMember, Category, Product, ProductVariation, OrderType, POSSession
 import ProductDetailsModal from './ProductDetailsModal';
 import CustomerModal from './CustomerModal';
 import PaymentModal from './PaymentModal';
-import { Trash2, User, ChevronRight } from 'lucide-react';
+import { Trash2, User, ChevronRight, Loader2 } from 'lucide-react';
 
 const { useState, useEffect } = React;
 
@@ -29,6 +29,8 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
   const [showCustomerModal, setShowCustomerModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+
   // --- CHARGEMENT ---
   useEffect(() => {
     loadInitialData();
@@ -40,7 +42,26 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
 
   const loadInitialData = async () => {
     try {
-      const cats = await window.electronAPI.db.getCategories();
+      let cats = await window.electronAPI.db.getCategories();
+      
+      // Synchro auto si vide
+      if (cats.length === 0) {
+        console.log("⚠️ Base locale vide. Lancement de la synchronisation initiale...");
+        setIsSyncing(true);
+        try {
+          const result = await window.electronAPI.db.syncFullPull();
+          if (result.success) {
+            cats = await window.electronAPI.db.getCategories();
+          } else {
+            alert("Erreur de synchronisation : " + result.error);
+          }
+        } catch (syncErr) {
+          console.error("❌ Erreur critique synchro:", syncErr);
+        } finally {
+          setIsSyncing(false);
+        }
+      }
+
       setCategories(cats);
       if (cats.length > 0) {
           const firstCatId = cats[0].id;
@@ -48,6 +69,7 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
       }
     } catch (e) {
       console.error("Erreur chargement:", e);
+      setIsSyncing(false);
     }
   };
 
@@ -111,7 +133,6 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
             setCart([]);
             setCurrentCustomer(null);
             setShowPaymentModal(false);
-            // On pourrait ajouter un Toast ici
         } else {
             alert("Erreur: " + result.error);
         }
@@ -121,11 +142,22 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
     }
   };
 
+  if (isSyncing) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full bg-slate-100 dark:bg-slate-950 text-slate-500 font-sans z-[100] relative">
+        <Loader2 className="w-12 h-12 animate-spin mb-4 text-primary" />
+        <h2 className="text-xl font-bold text-slate-800 dark:text-white">Initialisation de la caisse</h2>
+        <p className="text-sm">Synchronisation du menu et des produits...</p>
+      </div>
+    );
+  }
+
+  // ✅ CORRECTION MAJEURE ICI : Z-INDEX ET RELATIVE POSITIONING
   return (
-    <div className="flex h-full bg-slate-100 dark:bg-slate-950 overflow-hidden font-sans">
+    <div className="flex h-full w-full bg-slate-100 dark:bg-slate-950 overflow-hidden font-sans relative isolate">
       
-      {/* 1. COLONNE CATÉGORIES (GAUCHE) */}
-      <div className="w-28 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col items-center py-4 overflow-y-auto hide-scrollbar z-20">
+      {/* 1. COLONNE CATÉGORIES (GAUCHE) - Z-INDEX BOOSTÉ À 50 */}
+      <div className="w-28 bg-white dark:bg-slate-900 border-r border-slate-200 dark:border-slate-800 flex flex-col items-center py-4 overflow-y-auto hide-scrollbar z-50 shadow-lg shrink-0">
         {categories.map(cat => (
           <button 
             key={cat.id} 
@@ -147,10 +179,10 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         ))}
       </div>
 
-      {/* 2. GRILLE PRODUITS (CENTRE) */}
-      <div className="flex-1 flex flex-col h-full min-w-0 bg-slate-100 dark:bg-slate-950 relative">
-        {/* Topbar POS */}
-        <div className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 shadow-sm z-10">
+      {/* 2. GRILLE PRODUITS (CENTRE) - Z-INDEX CONTRÔLÉ */}
+      <div className="flex-1 flex flex-col h-full min-w-0 bg-slate-100 dark:bg-slate-950 relative z-0">
+        {/* Topbar POS - Z-INDEX 40 (Au-dessus des produits mais sous les modales) */}
+        <div className="h-16 bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-4 shadow-sm z-40 relative">
             <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
                 <OrderModeButton active={orderType === 'dine_in'} label="Sur Place" icon="🍽️" onClick={() => setOrderType('dine_in')} />
                 <OrderModeButton active={orderType === 'takeaway'} label="Emporté" icon="🛍️" onClick={() => setOrderType('takeaway')} />
@@ -169,8 +201,8 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
             </button>
         </div>
 
-        {/* Grille */}
-        <div className="flex-1 p-4 overflow-y-auto custom-scrollbar">
+        {/* Grille - Z-INDEX 0 */}
+        <div className="flex-1 p-4 overflow-y-auto custom-scrollbar relative z-0">
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-20">
             {products.length === 0 && (
                 <div className="col-span-full flex flex-col items-center justify-center text-slate-400 mt-20">
@@ -185,9 +217,9 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         </div>
       </div>
 
-      {/* 3. PANIER (DROITE) */}
-      <div className="w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-30 shrink-0">
-        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900">
+      {/* 3. PANIER (DROITE) - Z-INDEX BOOSTÉ À 50 */}
+      <div className="w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-800 flex flex-col h-full shadow-2xl z-50 shrink-0 relative">
+        <div className="h-16 flex items-center justify-between px-5 border-b border-slate-100 dark:border-slate-800 bg-white dark:bg-slate-900 z-10">
             <h3 className="font-bold text-lg text-slate-800 dark:text-white">Panier</h3>
             <span className="text-[10px] px-2 py-1 rounded-md font-bold uppercase bg-orange-100 text-primary dark:bg-orange-900/30">
                 {orderType.replace('_', ' ')}
@@ -226,7 +258,7 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         </div>
 
         {/* Footer Total */}
-        <div className="p-5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800">
+        <div className="p-5 bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 z-10">
             <div className="flex justify-between items-center mb-6">
                 <span className="text-slate-500 text-sm font-medium">Total à payer</span>
                 <span className="text-3xl font-black text-slate-900 dark:text-white tracking-tight">
@@ -244,7 +276,7 @@ const POSMainScreen: React.FC<POSMainScreenProps> = ({ user, session }) => {
         </div>
       </div>
 
-      {/* MODALES */}
+      {/* MODALES - Z-INDEX TRÈS HAUT (Géré généralement par le composant Modal lui-même, mais on s'assure qu'elles sont rendues) */}
       {productToConfigure && <ProductDetailsModal product={productToConfigure} onClose={() => setProductToConfigure(null)} onAddToCart={addToCart} />}
       {showCustomerModal && <CustomerModal onClose={() => setShowCustomerModal(false)} onSelectCustomer={(c) => { setCurrentCustomer(c); setShowCustomerModal(false); }} />}
       {showPaymentModal && <PaymentModal total={cartTotal} onClose={() => setShowPaymentModal(false)} onConfirm={handlePayment} />}
