@@ -1,6 +1,3 @@
-// See the Electron documentation for details on how to use preload scripts:
-// https://www.electronjs.org/docs/latest/tutorial/process-model#preload-scripts
-
 import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('electronAPI', {
@@ -17,11 +14,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getCategories: () => ipcRenderer.invoke('db:get-categories'),
     getProductsByCategory: (categoryId: string) => ipcRenderer.invoke('db:get-products-by-category', categoryId),
     getProductVariations: (productId: string) => ipcRenderer.invoke('db:get-product-variations', productId),
-    
-    // ✅ AJOUT : Exposer la méthode options
     getProductOptions: (productId: string) => ipcRenderer.invoke('db:get-product-options', productId),
+    getProductIngredients: (productId: string) => ipcRenderer.invoke('db:get-product-ingredients', productId), // ✅
 
-    // --- CRM CLIENTS ---
+    // --- CRM ---
     searchCustomers: (query: string) => ipcRenderer.invoke('db:search-customers', query),
     createCustomer: (customer: { full_name: string; phone: string; address?: string }) => 
       ipcRenderer.invoke('db:create-customer', customer),
@@ -30,6 +26,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     // --- COMMANDES LIVE ---
     getLiveOrders: () => ipcRenderer.invoke('db:get-live-orders'),
     updateOrderStatus: (orderId: string, status: string) => ipcRenderer.invoke('db:update-order-status', orderId, status),
+    payOrder: (orderId: string, method: string, amount: number) => ipcRenderer.invoke('db:pay-order', orderId, method, amount),
 
     // --- TRANSACTIONNEL ---
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -39,6 +36,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // --- SYSTÈME ---
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   onNetworkStatusChange: (callback: (status: boolean) => void) => {
+    // Simulation réseau online
     callback(true);
   }
 });

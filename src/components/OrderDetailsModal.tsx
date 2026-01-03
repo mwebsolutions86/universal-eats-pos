@@ -1,7 +1,10 @@
 import * as React from 'react';
 import { Order, OrderItem } from '../types';
-import { X, Printer, User, Clock, CreditCard, ChefHat, Bike, CheckCircle2, MapPin } from 'lucide-react';
-import { getStatusBadge } from './OrderUI';
+import { X, Printer, User, Clock, CreditCard, ChefHat, Bike, CheckCircle2, MapPin, Banknote } from 'lucide-react';
+import { getStatusBadge, renderOrderItemDetails } from './OrderUI';
+import PaymentModal from './PaymentModal';
+
+const { useState } = React;
 
 interface OrderDetailsModalProps {
   order: Order;
@@ -10,58 +13,35 @@ interface OrderDetailsModalProps {
 }
 
 const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, onUpdateStatus }) => {
-  // Calculs simples
-  const subtotal = order.total_amount; 
+  const subtotal = order.total_amount || 0; 
+  const [showPayment, setShowPayment] = useState(false);
 
-  const getNextActions = () => {
-    switch(order.status) {
-      case 'pending': return [{ label: 'Valider & Cuisine', status: 'preparing', color: 'bg-blue-600 hover:bg-blue-700' }];
-      case 'confirmed': return [{ label: 'Lancer Cuisine', status: 'preparing', color: 'bg-orange-600 hover:bg-orange-700' }];
-      case 'preparing': return [{ label: 'Commande Prête', status: 'ready', color: 'bg-green-600 hover:bg-green-700' }];
-      case 'ready': 
-        return order.order_type === 'delivery' 
-          ? [{ label: 'Partir en Livraison', status: 'out_for_delivery', color: 'bg-purple-600 hover:bg-purple-700' }]
-          : [{ label: 'Remettre au Client', status: 'delivered', color: 'bg-gray-800 hover:bg-gray-900' }];
-      case 'out_for_delivery': return [{ label: 'Confirmer Livraison', status: 'delivered', color: 'bg-gray-800 hover:bg-gray-900' }];
-      default: return [];
-    }
+  const handlePaymentConfirm = async (method: 'cash' | 'card', amountReceived: number) => {
+      try {
+          await window.electronAPI.db.payOrder(order.id, method, amountReceived);
+          setShowPayment(false);
+          onUpdateStatus('confirmed'); 
+      } catch (e) {
+          console.error("Erreur paiement", e);
+      }
   };
 
-  // Fonction helper pour afficher les options (JSON ou Objet)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const renderOptions = (options: any) => {
-    if (!options) return null;
-
-    let parsedOpts = options;
-    // Si c'est une string JSON (cas fréquent avec SQLite), on parse
-    if (typeof options === 'string') {
-        try { parsedOpts = JSON.parse(options); } catch { return null; }
+  const getNextActions = () => {
+    if (order.status !== 'cancelled' && order.status !== 'delivered') {
+         // Si payé, on peut avancer. Si pas payé, le bouton Encaisser sera affiché à côté
     }
 
-    // Cas 1 : Format "CartItem" complet sauvegardé (variation + options)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const list: any[] = [];
-    
-    // Si on a une variation stockée
-    if (parsedOpts.variation) {
-        list.push(<div key="var" className="text-xs text-slate-500 font-bold">📏 {parsedOpts.variation.name}</div>);
+    switch(order.status) {
+      case 'pending': return [{ label: 'Confirmer', status: 'confirmed', color: 'bg-blue-600 text-white hover:bg-blue-700' }];
+      case 'confirmed': return [{ label: 'Envoyer Cuisine', status: 'preparing', color: 'bg-orange-600 text-white hover:bg-orange-700' }];
+      case 'preparing': return [{ label: 'Prêt', status: 'ready', color: 'bg-green-600 text-white hover:bg-green-700' }];
+      case 'ready': 
+        return order.order_type === 'delivery' 
+          ? [{ label: 'Partir en Livraison', status: 'out_for_delivery', color: 'bg-purple-600 text-white hover:bg-purple-700' }]
+          : [{ label: 'Terminer', status: 'delivered', color: 'bg-slate-800 text-white hover:bg-slate-900' }];
+      case 'out_for_delivery': return [{ label: 'Livré', status: 'delivered', color: 'bg-slate-800 text-white hover:bg-slate-900' }];
+      default: return [];
     }
-
-    // Si on a des options (suppléments) stockés dans "options" ou si parsedOpts est lui-même un tableau
-    const supplements = Array.isArray(parsedOpts) ? parsedOpts : (parsedOpts.options || []);
-    
-    if (Array.isArray(supplements) && supplements.length > 0) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        supplements.forEach((opt: any, i: number) => {
-             list.push(
-                 <div key={`opt-${i}`} className="text-xs text-slate-500">
-                    + {opt.name} {opt.price > 0 && `(${Number(opt.price).toFixed(0)} DH)`}
-                 </div>
-             );
-        });
-    }
-
-    return list.length > 0 ? <div className="mt-1 pl-2 border-l-2 border-slate-100">{list}</div> : null;
   };
 
   return (
@@ -92,22 +72,18 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
           </div>
         </div>
 
+        {/* BODY */}
         <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-950">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             
-            {/* COLONNE GAUCHE : ITEMS */}
+            {/* GAUCHE : ITEMS */}
             <div className="lg:col-span-2 space-y-6">
-              <div>
-                <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wide mb-4 flex items-center gap-2">
-                  <ChefHat size={16} /> Détails de la commande
-                </h3>
-                <div className="bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
+              <div className="bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
                   <table className="w-full text-left text-sm">
                     <thead className="bg-gray-100 dark:bg-slate-800 text-gray-500 dark:text-slate-400 font-medium">
                       <tr>
                         <th className="px-4 py-3">Produit</th>
                         <th className="px-4 py-3 text-center">Qté</th>
-                        <th className="px-4 py-3 text-right">Prix U.</th>
                         <th className="px-4 py-3 text-right">Total</th>
                       </tr>
                     </thead>
@@ -115,24 +91,19 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                       {order.items?.map((item: OrderItem, idx: number) => (
                           <tr key={idx}>
                             <td className="px-4 py-3">
-                              <span className="font-bold text-gray-800 dark:text-white">{item.product_name}</span>
-                              {/* Rendu intelligent des options/variations */}
-                              {renderOptions(item.options)}
+                              <span className="font-bold text-gray-800 dark:text-white text-base">{item.product_name}</span>
+                              {renderOrderItemDetails(item.options)}
                             </td>
                             <td className="px-4 py-3 text-center font-medium bg-white/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300">
                                 {item.quantity}
                             </td>
-                            <td className="px-4 py-3 text-right text-gray-500 dark:text-slate-400">
-                                {item.unit_price.toFixed(2)}
-                            </td>
                             <td className="px-4 py-3 text-right font-bold text-gray-900 dark:text-white">
-                                {item.total_price.toFixed(2)}
+                                {(item.total_price || 0).toFixed(2)}
                             </td>
                           </tr>
                       ))}
                     </tbody>
                   </table>
-                </div>
               </div>
 
               {/* Résumé Financier */}
@@ -148,16 +119,14 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                   </div>
                   <div className="pt-2 border-t border-gray-200 dark:border-slate-700 flex justify-between items-center">
                     <span className="font-bold text-gray-900 dark:text-white">Total à payer</span>
-                    <span className="font-black text-xl text-blue-600">{order.total_amount.toFixed(2)} <span className="text-xs">DH</span></span>
+                    <span className="font-black text-xl text-blue-600">{subtotal.toFixed(2)} <span className="text-xs">DH</span></span>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* COLONNE DROITE : CLIENT & INFO */}
+            {/* DROITE : CLIENT & INFO */}
             <div className="space-y-6">
-              
-              {/* Carte Client */}
               <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
                 <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
                   <User size={14} /> Client
@@ -171,7 +140,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                     <p className="text-sm text-gray-500">{order.customer_phone || 'Pas de téléphone'}</p>
                   </div>
                 </div>
-                
                 {order.order_type === 'delivery' && (
                   <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3 text-sm text-blue-800 dark:text-blue-300 flex gap-2 items-start">
                     <MapPin size={16} className="shrink-0 mt-0.5" />
@@ -180,21 +148,16 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                 )}
               </div>
 
-              {/* Info Paiement & Type */}
               <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
                 <div>
                   <h3 className="text-xs font-bold text-gray-400 uppercase mb-2 flex items-center gap-2">
                     <CreditCard size={14} /> Paiement
                   </h3>
                   <div className="flex justify-between items-center">
-                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">Méthode</span>
                     <span className="text-sm font-bold uppercase bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
                       {order.payment_method || 'Espèces'}
                     </span>
-                  </div>
-                  <div className="flex justify-between items-center mt-2">
-                    <span className="text-sm font-medium text-gray-700 dark:text-slate-300">Statut</span>
-                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${order.payment_status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'}`}>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${order.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
                       {order.payment_status === 'paid' ? 'PAYÉ' : 'EN ATTENTE'}
                     </span>
                   </div>
@@ -217,24 +180,49 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
 
         {/* FOOTER ACTIONS */}
         <div className="p-4 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 flex justify-between items-center">
-          <button onClick={() => onUpdateStatus('cancelled')} className="px-4 py-2 text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm">
-            Annuler la commande
-          </button>
+          
+          <div className="flex items-center gap-4">
+               {/* BOUTON ENCAISSER */}
+               {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+                  <button 
+                    onClick={() => setShowPayment(true)}
+                    className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold shadow-lg shadow-green-500/20 active:scale-95 transition-all flex items-center gap-2"
+                  >
+                    <Banknote size={20} />
+                    ENCAISSER
+                  </button>
+               )}
+               {/* BOUTON ANNULER */}
+               {order.status !== 'cancelled' && order.status !== 'delivered' && (
+                    <button onClick={() => onUpdateStatus('cancelled')} className="px-4 py-2 text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm">
+                        Annuler
+                    </button>
+               )}
+          </div>
           
           <div className="flex gap-3">
             {getNextActions().map((action, i) => (
               <button
                 key={i}
                 onClick={() => onUpdateStatus(action.status)}
-                className={`px-6 py-3 rounded-xl font-bold text-white shadow-lg shadow-blue-500/20 active:scale-95 transition-all ${action.color}`}
+                className={`px-6 py-3 rounded-xl font-bold shadow-lg active:scale-95 transition-all ${action.color}`}
               >
                 {action.label}
               </button>
             ))}
           </div>
         </div>
-
       </div>
+
+      {/* MODAL PAIEMENT */}
+      {showPayment && (
+          <PaymentModal 
+             total={subtotal}
+             onClose={() => setShowPayment(false)}
+             onConfirm={handlePaymentConfirm}
+          />
+      )}
+
     </div>
   );
 };

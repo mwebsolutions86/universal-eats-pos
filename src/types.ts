@@ -1,7 +1,5 @@
 // src/types.ts
 
-// --- Types Globaux ---
-
 export type UserRole = 'owner' | 'manager' | 'cashier' | 'staff' | 'driver' | 'super_admin' | 'admin';
 
 export interface StaffMember {
@@ -62,6 +60,12 @@ export interface ProductVariation {
   sort_order: number | null;
 }
 
+export interface Ingredient {
+  id: string;
+  name: string;
+  is_available: boolean;
+}
+
 export interface ProductOptionLink {
   product_id: string;
   group_id: string;
@@ -84,12 +88,9 @@ export interface OptionItem {
   is_available: boolean | null;
 }
 
-// ✅ AJOUT : Type combiné pour le front-end
 export interface OptionGroupWithItems extends OptionGroup {
   items: OptionItem[];
 }
-
-// --- Commandes & Panier ---
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'phone';
 
@@ -97,7 +98,18 @@ export interface CartItem {
   product: Product;
   variation?: ProductVariation;
   qty: number;
-  options?: OptionItem[]; // ✅ AJOUT : Support des options dans le panier
+  options?: OptionItem[]; 
+  note?: string; 
+  removedIngredients?: string[];
+}
+
+export interface OrderItem {
+  id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  options?: Record<string, unknown> | null; 
 }
 
 export interface Order {
@@ -120,17 +132,6 @@ export interface Order {
   items?: OrderItem[];
 }
 
-export interface OrderItem {
-  id: string;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  options?: Record<string, unknown> | null; 
-}
-
-// --- Interface Bridge Electron ---
-
 export interface IElectronAPI {
   db: {
     checkStaffPin: (pin: string) => Promise<StaffMember | null>;
@@ -142,12 +143,12 @@ export interface IElectronAPI {
     getCategories: () => Promise<Category[]>;
     getProductsByCategory: (categoryId: string) => Promise<Product[]>;
     getProductVariations: (productId: string) => Promise<ProductVariation[]>;
-    
-    // ✅ AJOUT : Méthode manquante pour récupérer les options
     getProductOptions: (productId: string) => Promise<OptionGroupWithItems[]>;
+    getProductIngredients: (productId: string) => Promise<Ingredient[]>;
     
     getLiveOrders: () => Promise<Order[]>;
     updateOrderStatus: (orderId: string, status: string) => Promise<void>;
+    payOrder: (orderId: string, paymentMethod: string, amountReceived: number) => Promise<boolean>;
 
     searchCustomers: (query: string) => Promise<Customer[]>;
     createCustomer: (customer: Omit<Customer, 'id'>) => Promise<Customer>;

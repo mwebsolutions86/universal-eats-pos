@@ -27,7 +27,7 @@ export function Sidebar({ user, currentView, onNavigate, onLogout }: SidebarProp
   const commonItems = [
     { name: 'Caisse (Live)', id: 'pos', icon: LayoutDashboard },
     { name: 'Commandes (Live)', id: 'live-orders', icon: LayoutDashboard },
-    { name: 'Historique', id: 'history', icon: HistoryIcon },
+    { name: 'Historique', id: 'History', icon: HistoryIcon },
     { name: 'QR Codes', id: 'qr-codes', icon: QrCode }, 
   ];
 
