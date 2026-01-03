@@ -1,92 +1,23 @@
-// src/types.ts
+import { Database } from './types/database.types';
 
-export type UserRole = 'owner' | 'manager' | 'cashier' | 'staff' | 'driver' | 'super_admin' | 'admin';
+// Raccourcis Supabase
+type PublicSchema = Database['public'];
+export type Tables<T extends keyof PublicSchema['Tables']> = PublicSchema['Tables'][T]['Row'];
+export type Enums<T extends keyof PublicSchema['Enums']> = PublicSchema['Enums'][T];
 
-export interface StaffMember {
-  id: string;
-  store_id: string | null;
-  full_name: string | null;
-  role: UserRole | null;
-  avatar_url: string | null;
-  pos_pin?: string | null;
-}
+// --- Types de base mappés sur la DB ---
+export type StaffMember = Tables<'profiles'>;
+export type Customer = Tables<'cust_profiles'>;
+export type Category = Tables<'categories'>;
+export type Product = Tables<'products'> & { type: Database["public"]["Enums"]["product_type"] }; 
+export type ProductVariation = Tables<'product_variations'>;
+export type OptionGroup = Tables<'option_groups'>;
+export type OptionItem = Tables<'option_items'>;
+export type ProductOptionLink = Tables<'product_option_links'>;
+export type Ingredient = Tables<'ingredients'>;
+export type ProductIngredient = Tables<'product_ingredients'>;
 
-export interface POSSession {
-  id: string;
-  store_id: string;
-  opened_by: string; 
-  opened_at: string;
-  closed_at?: string | null;
-  opening_balance: number;
-  closing_balance?: number | null; 
-  actual_closing_balance?: number | null; 
-  difference?: number | null;
-  notes?: string | null;
-  status: 'open' | 'closed';
-}
-
-export interface Customer {
-  id: string;
-  full_name: string;
-  phone: string;
-  address?: string | null;
-  loyalty_points?: number;
-}
-
-export interface Category {
-  id: string;
-  name: string;
-  image_url?: string | null;
-  rank?: number | null;
-}
-
-export interface Product {
-  id: string;
-  category_id: string | null;
-  name: string;
-  description: string | null;
-  price: number;
-  image_url: string | null;
-  is_available: boolean | null;
-  type?: 'simple' | 'variable' | 'combo';
-}
-
-export interface ProductVariation {
-  id: string;
-  product_id: string | null;
-  name: string;
-  price: number;
-  is_available: boolean | null;
-  sort_order: number | null;
-}
-
-export interface Ingredient {
-  id: string;
-  name: string;
-  is_available: boolean;
-}
-
-export interface ProductOptionLink {
-  product_id: string;
-  group_id: string;
-  sort_order: number | null;
-}
-
-export interface OptionGroup {
-  id: string;
-  name: string;
-  type: string | null;
-  min_selection: number | null;
-  max_selection: number | null;
-}
-
-export interface OptionItem {
-  id: string;
-  group_id: string | null;
-  name: string;
-  price: number | null;
-  is_available: boolean | null;
-}
+// --- Extensions UI & Logique ---
 
 export interface OptionGroupWithItems extends OptionGroup {
   items: OptionItem[];
@@ -94,44 +25,30 @@ export interface OptionGroupWithItems extends OptionGroup {
 
 export type OrderType = 'dine_in' | 'takeaway' | 'delivery' | 'phone';
 
+// Panier
 export interface CartItem {
   product: Product;
-  variation?: ProductVariation;
+  variation?: ProductVariation | null;
   qty: number;
   options?: OptionItem[]; 
   note?: string; 
   removedIngredients?: string[];
 }
 
-export interface OrderItem {
-  id: string;
-  product_name: string;
-  quantity: number;
-  unit_price: number;
-  total_price: number;
-  options?: Record<string, unknown> | null; 
-}
+// CORRECTION: Remplacement de 'any' par 'Record<string, unknown>' ou 'unknown'
+export type OrderItem = Tables<'order_items'> & {
+  // Propriétés calculées
+  parsed_options?: Record<string, unknown> | null;
+};
 
-export interface Order {
-  id: string;
-  order_number: number;
-  customer_id?: string | null;
-  customer?: Customer;
-  customer_name: string | null;
-  customer_phone: string | null;
-  delivery_address: string | null;
-  order_type: OrderType;
-  total_amount: number;
-  status: 'pending' | 'confirmed' | 'preparing' | 'ready' | 'delivered' | 'cancelled' | 'out_for_delivery';
-  payment_status: 'pending' | 'paid';
-  payment_method?: string | null;
-  amount_received?: number | null;
-  amount_returned?: number | null;
-  channel: 'web' | 'app' | 'pos';
-  created_at: string;
+// Order
+export interface Order extends Tables<'orders'> {
   items?: OrderItem[];
+  customer?: Customer | null; 
+  status: Database["public"]["Enums"]["order_status"] | null;
 }
 
+// --- Interface Electron ---
 export interface IElectronAPI {
   db: {
     checkStaffPin: (pin: string) => Promise<StaffMember | null>;
@@ -151,7 +68,7 @@ export interface IElectronAPI {
     payOrder: (orderId: string, paymentMethod: string, amountReceived: number) => Promise<boolean>;
 
     searchCustomers: (query: string) => Promise<Customer[]>;
-    createCustomer: (customer: Omit<Customer, 'id'>) => Promise<Customer>;
+    createCustomer: (customer: Omit<Customer, 'id' | 'created_at' | 'loyalty_points'>) => Promise<Customer>;
     syncCustomers: () => Promise<void>;
 
     createOrder: (orderData: {

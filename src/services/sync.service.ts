@@ -3,10 +3,11 @@ import { Database } from 'better-sqlite3';
 import { StaffMember, Category, OptionGroup, OptionItem, Product, ProductVariation, ProductOptionLink, Customer, Ingredient } from '../types';
 
 export class SyncService {
+  // CORRECTION 1: On utilise 'any' pour éviter le conflit de namespace/type sur cette version de la lib
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private supabase: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private supabaseAdmin: any;
+  private supabaseAdmin: any | null = null;
   private db: Database;
   private storeId: string | undefined;
   private brandId: string | undefined;
@@ -20,10 +21,13 @@ export class SyncService {
 
     if (!supabaseUrl || !supabaseKey) throw new Error("Missing Supabase vars.");
     
+    // CORRECTION 2: Suppression du générique <SupabaseDB> qui causait l'erreur "Untyped function calls"
     this.supabase = createClient(supabaseUrl, supabaseKey);
-    // Client Admin pour les Updates
+    
     if (serviceRoleKey) {
-        this.supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } });
+        this.supabaseAdmin = createClient(supabaseUrl, serviceRoleKey, { 
+            auth: { autoRefreshToken: false, persistSession: false } 
+        });
     }
   }
 
@@ -33,10 +37,10 @@ export class SyncService {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: store } = await this.supabase.from('stores').select('brand_id, name').eq('id', this.storeId).single();
         if (store) {
-            this.brandId = store.brand_id;
+            this.brandId = store.brand_id || undefined;
             const setConfig = this.db.prepare("INSERT OR REPLACE INTO local_config (key, value) VALUES (?, ?)");
             setConfig.run('STORE_ID', this.storeId);
-            setConfig.run('BRAND_ID', this.brandId);
+            if(this.brandId) setConfig.run('BRAND_ID', this.brandId);
         }
     }
   }
@@ -66,6 +70,8 @@ export class SyncService {
   async syncLiveOrders(): Promise<{ success: boolean; count?: number; error?: string }> {
     try {
         await this.initContext();
+        if (!this.storeId) return { success: false, error: "Store ID missing" };
+
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const { data: orders, error } = await this.supabase.from('orders').select(`*, order_items (*)`) .eq('store_id', this.storeId).in('status', ['pending', 'confirmed', 'preparing', 'ready', 'out_for_delivery']); 
         if (error) throw error;
@@ -97,13 +103,13 @@ export class SyncService {
       await this.syncStaff();
       await this.syncCustomers(); 
       await this.syncCategories();
-      await this.syncIngredients(); // ✅
+      await this.syncIngredients();
       await this.syncOptionGroups();
       await this.syncOptionItems();
       await this.syncProducts();
       await this.syncProductVariations();
       await this.syncProductOptionLinks();
-      await this.syncProductIngredients(); // ✅
+      await this.syncProductIngredients();
       await this.syncLiveOrders();
       this.subscribeToOrders();
       return { success: true };
@@ -118,36 +124,112 @@ export class SyncService {
   }
 
   // --- SYNC DATA ---
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncStaff() { const client = this.supabaseAdmin || this.supabase; const { data } = await client.from('profiles').select('*').eq('store_id', this.storeId); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_staff_cache (id, store_id, full_name, role, pos_pin, avatar_url) VALUES (?, ?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: StaffMember[]) => { for (const item of items) upsert.run(item.id, item.store_id, item.full_name, item.role, item.pos_pin, item.avatar_url); }); tx(data as unknown as StaffMember[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncCustomers() { const { data } = await this.supabase.from('cust_profiles').select('*'); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_customers (id, full_name, phone, address, loyalty_points) VALUES (?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: Customer[]) => { for (const item of items) upsert.run(item.id, item.full_name, item.phone, item.address, item.loyalty_points || 0); }); tx(data as unknown as Customer[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncCategories() { const { data } = await this.supabase.from('categories').select('*').eq('brand_id', this.brandId); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_categories (id, name, image_url, display_order) VALUES (?, ?, ?, ?)`); const tx = this.db.transaction((items: Category[]) => { for (const i of items) upsert.run(i.id, i.name, i.image_url, i.rank); }); tx(data as unknown as Category[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncOptionGroups() { const { data } = await this.supabase.from('option_groups').select('*').eq('brand_id', this.brandId); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_groups (id, name, type, min_selection, max_selection) VALUES (?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: OptionGroup[]) => { for (const i of items) upsert.run(i.id, i.name, i.type, i.min_selection, i.max_selection); }); tx(data as unknown as OptionGroup[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncOptionItems() { const { data } = await this.supabase.from('option_items').select('*'); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_items (id, group_id, name, price, is_available) VALUES (?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: OptionItem[]) => { for (const i of items) upsert.run(i.id, i.group_id, i.name, i.price, i.is_available?1:0); }); tx(data as unknown as OptionItem[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncProducts() { const { data } = await this.supabase.from('products').select('*').eq('brand_id', this.brandId); if(data) { const fallback = this.db.prepare('SELECT id FROM local_categories LIMIT 1').get() as {id: string}; const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_products (id, category_id, name, description, price, image_url, is_available, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: Product[]) => { for (const i of items) upsert.run(i.id, i.category_id || fallback?.id, i.name, i.description, i.price, i.image_url, i.is_available?1:0, i.type||'simple'); }); tx(data as unknown as Product[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncProductVariations() { const { data } = await this.supabase.from('product_variations').select('*'); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_variations (id, product_id, name, price, is_available, sort_order) VALUES (?, ?, ?, ?, ?, ?)`); const tx = this.db.transaction((items: ProductVariation[]) => { for (const i of items) upsert.run(i.id, i.product_id, i.name, i.price, i.is_available?1:0, i.sort_order); }); tx(data as unknown as ProductVariation[]); } }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async syncProductOptionLinks() { const { data } = await this.supabase.from('product_option_links').select('*'); if(data) { const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_option_links (product_id, group_id, sort_order) VALUES (?, ?, ?)`); const tx = this.db.transaction((items: ProductOptionLink[]) => { for (const i of items) upsert.run(i.product_id, i.group_id, i.sort_order); }); tx(data as unknown as ProductOptionLink[]); } }
-  // ✅ SYNC INGREDIENTS
+  
+  // CORRECTION 3: Guard Clauses pour remplacer les '!'
+  private async syncStaff() { 
+      if (!this.storeId) return; 
+      const client = this.supabaseAdmin || this.supabase; 
+      const { data } = await client.from('profiles').select('*').eq('store_id', this.storeId); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_staff_cache (id, store_id, full_name, role, pos_pin, avatar_url) VALUES (?, ?, ?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: StaffMember[]) => { for (const item of items) upsert.run(item.id, item.store_id, item.full_name, item.role, item.pos_pin, item.avatar_url); }); 
+          tx(data as unknown as StaffMember[]); 
+      } 
+  }
+
+  private async syncCustomers() { 
+      const { data } = await this.supabase.from('cust_profiles').select('*'); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_customers (id, full_name, phone, address, loyalty_points) VALUES (?, ?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: Customer[]) => { for (const item of items) upsert.run(item.id, item.full_name, item.phone, item.address, item.loyalty_points || 0); }); 
+          tx(data as unknown as Customer[]); 
+      } 
+  }
+
+  private async syncCategories() { 
+      if (!this.brandId) return;
+      const { data } = await this.supabase.from('categories').select('*').eq('brand_id', this.brandId); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_categories (id, name, image_url, display_order) VALUES (?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: Category[]) => { for (const i of items) upsert.run(i.id, i.name, i.image_url, i.rank); }); 
+          tx(data as unknown as Category[]); 
+      } 
+  }
+
+  private async syncOptionGroups() { 
+      if (!this.brandId) return;
+      const { data } = await this.supabase.from('option_groups').select('*').eq('brand_id', this.brandId); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_groups (id, name, type, min_selection, max_selection) VALUES (?, ?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: OptionGroup[]) => { for (const i of items) upsert.run(i.id, i.name, i.type, i.min_selection, i.max_selection); }); 
+          tx(data as unknown as OptionGroup[]); 
+      } 
+  }
+
+  private async syncOptionItems() { 
+      const { data } = await this.supabase.from('option_items').select('*'); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_option_items (id, group_id, name, price, is_available) VALUES (?, ?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: OptionItem[]) => { for (const i of items) upsert.run(i.id, i.group_id, i.name, i.price, i.is_available?1:0); }); 
+          tx(data as unknown as OptionItem[]); 
+      } 
+  }
+  
+  private async syncProducts() { 
+      if (!this.brandId) return;
+      const { data } = await this.supabase.from('products').select('*').eq('brand_id', this.brandId); 
+      if(data) { 
+          const fallback = this.db.prepare('SELECT id FROM local_categories LIMIT 1').get() as {id: string}; 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_products (id, category_id, name, description, price, image_url, is_available, type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`); 
+          
+          const tx = this.db.transaction((items: Product[]) => { 
+              for (const i of items) {
+                  upsert.run(
+                      i.id, 
+                      i.category_id || fallback?.id, 
+                      i.name, 
+                      i.description, 
+                      i.price, 
+                      i.image_url, 
+                      i.is_available?1:0, 
+                      i.type||'simple'
+                  );
+              }
+          }); 
+          // CORRECTION 4: Suppression du 'as any', typage plus sûr
+          tx(data as unknown as Product[]); 
+      } 
+  }
+
+  private async syncProductVariations() { 
+      const { data } = await this.supabase.from('product_variations').select('*'); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_variations (id, product_id, name, price, is_available, sort_order) VALUES (?, ?, ?, ?, ?, ?)`); 
+          const tx = this.db.transaction((items: ProductVariation[]) => { for (const i of items) upsert.run(i.id, i.product_id, i.name, i.price, i.is_available?1:0, i.sort_order); }); 
+          tx(data as unknown as ProductVariation[]); 
+      } 
+  }
+
+  private async syncProductOptionLinks() { 
+      const { data } = await this.supabase.from('product_option_links').select('*'); 
+      if(data) { 
+          const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_option_links (product_id, group_id, sort_order) VALUES (?, ?, ?)`); 
+          const tx = this.db.transaction((items: ProductOptionLink[]) => { for (const i of items) upsert.run(i.product_id, i.group_id, i.sort_order); }); 
+          tx(data as unknown as ProductOptionLink[]); 
+      } 
+  }
+  
   private async syncIngredients() {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (!this.brandId) return;
       const { data } = await this.supabase.from('ingredients').select('*').eq('brand_id', this.brandId);
       if(data) {
           const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_ingredients (id, name, is_available) VALUES (?, ?, ?)`);
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const tx = this.db.transaction((items: Ingredient[]) => { for (const i of items) upsert.run(i.id, i.name, i.is_available?1:0); });
           tx(data as unknown as Ingredient[]);
       }
   }
-  // ✅ SYNC PRODUCT INGREDIENTS
+
   private async syncProductIngredients() {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const { data } = await this.supabase.from('product_ingredients').select('*');
       if(data) {
           const upsert = this.db.prepare(`INSERT OR REPLACE INTO local_product_ingredients (product_id, ingredient_id) VALUES (?, ?)`);
