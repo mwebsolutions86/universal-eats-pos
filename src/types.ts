@@ -16,6 +16,7 @@ export type OptionItem = Tables<'option_items'>;
 export type ProductOptionLink = Tables<'product_option_links'>;
 export type Ingredient = Tables<'ingredients'>;
 export type ProductIngredient = Tables<'product_ingredients'>;
+export type POSSession = Tables<'pos_sessions'>;
 
 // --- Extensions UI & Logique ---
 

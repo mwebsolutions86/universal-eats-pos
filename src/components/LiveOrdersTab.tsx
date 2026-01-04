@@ -7,20 +7,16 @@ import { RefreshCw, ChefHat, Bell } from 'lucide-react';
 const { useState, useEffect } = React;
 
 export const LiveOrdersTab = () => {
-  // Etats
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(false);
   const [view, setView] = useState<'list' | 'grid' | 'kanban'>('kanban'); 
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
   const [lastRefresh, setLastRefresh] = useState(new Date());
 
-  // Chargement INTELLIGENT (Locale + Option Cloud)
   const fetchOrders = async (triggerCloudSync = false) => {
     if (triggerCloudSync) setLoading(true);
     try {
       if (window.electronAPI) {
-        
-        // 1. Si demandé, on lance d'abord une synchro Cloud silencieuse
         if (triggerCloudSync) {
             try {
                 await window.electronAPI.db.syncLiveOrders();
@@ -28,8 +24,6 @@ export const LiveOrdersTab = () => {
                 console.warn("Auto-sync ignorée (réseau ?):", err);
             }
         }
-
-        // 2. Ensuite on lit la base locale (C'est ce qui met à jour l'écran)
         const localData = await window.electronAPI.db.getLiveOrders();
         setOrders(localData);
         setLastRefresh(new Date());
@@ -41,31 +35,25 @@ export const LiveOrdersTab = () => {
     }
   };
 
-  // Synchro Force (Bouton Rafraîchir)
   const handleForceSync = () => {
-    fetchOrders(true); // true = force le cloud
+    fetchOrders(true);
   };
 
-  // Mise à jour statut
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
       try {
           await window.electronAPI.db.updateOrderStatus(orderId, newStatus);
-          // On recharge juste la base locale pour aller vite
           await fetchOrders(false); 
-          
           if (selectedOrder && selectedOrder.id === orderId) {
-              setSelectedOrder(null); // Fermer modal si fini
+              setSelectedOrder(null);
           }
       } catch (e) {
           console.error("Erreur update status:", e);
       }
   };
 
-  // Initialisation & Auto-Sync
   useEffect(() => {
     fetchOrders(false);
     fetchOrders(true);
-
     const interval = setInterval(() => {
         if (window.electronAPI) {
             window.electronAPI.db.syncLiveOrders()
@@ -77,11 +65,9 @@ export const LiveOrdersTab = () => {
                 .catch(e => console.warn("Echec auto-sync background:", e));
         }
     }, 30000);
-
     return () => clearInterval(interval);
   }, []);
 
-  // --- RENDU : VUE KANBAN (CORRIGÉE : PLEINE LARGEUR) ---
   const renderKanban = () => {
     const columns = [
         { id: 'pending', label: 'À Valider', color: 'border-yellow-400 bg-yellow-50' },
@@ -99,12 +85,11 @@ export const LiveOrdersTab = () => {
     };
 
     return (
-        // ✅ MODIF: w-full et suppression du scroll horizontal inutile
         <div className="flex gap-3 h-full w-full"> 
             {columns.map(col => {
-                const colOrders = orders.filter(o => getColumnId(o.status) === col.id);
+                // ✅ CORRECTION : Gestion du null
+                const colOrders = orders.filter(o => getColumnId(o.status || 'pending') === col.id);
                 return (
-                    // ✅ MODIF: flex-1 et min-w-0 pour forcer le partage équitable de l'espace
                     <div key={col.id} className="flex-1 min-w-0 flex flex-col bg-slate-100 dark:bg-slate-900/50 rounded-xl border border-slate-200 dark:border-slate-800 h-full">
                         <div className={`p-3 border-b-2 ${col.color} font-bold text-slate-700 dark:text-slate-200 flex justify-between items-center bg-white dark:bg-slate-800 rounded-t-xl shrink-0`}>
                             <span className="truncate">{col.label}</span>
@@ -125,7 +110,6 @@ export const LiveOrdersTab = () => {
     );
   };
 
-  // --- RENDU : VUE GRILLE ---
   const renderGrid = () => (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 pb-10">
         {orders.map(order => (
@@ -136,18 +120,14 @@ export const LiveOrdersTab = () => {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 dark:bg-slate-950">
-      
-      {/* HEADER */}
       <div className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-6 py-4 flex justify-between items-center shadow-sm shrink-0 z-10">
         <div className="flex items-center gap-6">
             <h2 className="text-xl font-bold text-slate-800 dark:text-white flex items-center gap-2">
                 <ChefHat className="text-primary" />
                 Cuisine & Commandes
             </h2>
-            
             <ViewSwitcher currentView={view} onViewChange={setView} />
         </div>
-
         <div className="flex items-center gap-4">
             <span className="text-xs text-slate-400 hidden md:inline">
                 Dernière maj: {lastRefresh.toLocaleTimeString()}
@@ -162,8 +142,6 @@ export const LiveOrdersTab = () => {
             </button>
         </div>
       </div>
-
-      {/* CONTENU PRINCIPAL */}
       <div className="flex-1 p-4 overflow-hidden">
         {orders.length === 0 && !loading ? (
             <div className="h-full flex flex-col items-center justify-center text-slate-400">
@@ -179,8 +157,6 @@ export const LiveOrdersTab = () => {
             </>
         )}
       </div>
-
-      {/* MODAL DETAIL */}
       {selectedOrder && (
         <OrderDetailsModal 
             order={selectedOrder} 
@@ -192,4 +168,4 @@ export const LiveOrdersTab = () => {
   );
 };
 
-export default LiveOrdersTab; 
+export default LiveOrdersTab;

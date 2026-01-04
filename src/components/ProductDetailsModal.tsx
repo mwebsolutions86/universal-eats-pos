@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Product, ProductVariation, OptionGroupWithItems, OptionItem, CartItem, Ingredient } from '../types';
-import { X, Minus, Plus, ShoppingCart, CheckCircle2, AlertCircle, MessageSquare, Ban } from 'lucide-react';
+import { X, ShoppingCart, CheckCircle2, MessageSquare, Ban } from 'lucide-react'; // ✅ Imports nettoyés
 
 const { useState, useEffect } = React;
 
@@ -17,7 +17,6 @@ const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ product, onCl
   const [optionGroups, setOptionGroups] = useState<OptionGroupWithItems[]>([]);
   const [selectedOptions, setSelectedOptions] = useState<Record<string, OptionItem[]>>({});
   
-  // ✅ Ingrédients
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [removedIngredients, setRemovedIngredients] = useState<string[]>([]); 
 
@@ -38,7 +37,6 @@ const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ product, onCl
         const groups = await window.electronAPI.db.getProductOptions(product.id);
         setOptionGroups(groups);
         
-        // ✅ Load Ingredients
         const ings = await window.electronAPI.db.getProductIngredients(product.id);
         setIngredients(ings);
 
@@ -133,7 +131,7 @@ const ProductDetailsModal: React.FC<ProductDetailsModalProps> = ({ product, onCl
                             </div>
                         </div>
                     )}
-                    {/* ✅ Ingrédients */}
+                    {/* Ingrédients */}
                     {ingredients.length > 0 && (
                         <div className="bg-white dark:bg-slate-800/50 p-4 rounded-xl border border-slate-200 dark:border-slate-800">
                             <h3 className="font-bold text-sm text-slate-500 uppercase mb-3 flex items-center gap-2">❌ Ingrédients (Cliquer pour retirer)</h3>

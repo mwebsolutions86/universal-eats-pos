@@ -27,10 +27,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
   };
 
   const getNextActions = () => {
-    if (order.status !== 'cancelled' && order.status !== 'delivered') {
-         // Si payé, on peut avancer. Si pas payé, le bouton Encaisser sera affiché à côté
-    }
-
     switch(order.status) {
       case 'pending': return [{ label: 'Confirmer', status: 'confirmed', color: 'bg-blue-600 text-white hover:bg-blue-700' }];
       case 'confirmed': return [{ label: 'Envoyer Cuisine', status: 'preparing', color: 'bg-orange-600 text-white hover:bg-orange-700' }];
@@ -43,6 +39,9 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
       default: return [];
     }
   };
+
+  // ✅ CORRECTION : Remplacement de 'paid' (inexistant dans l'enum DB) par 'collected'
+  const isPaid = order.payment_status === 'collected';
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 font-sans">
@@ -58,7 +57,8 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
               <span className="text-xs text-gray-500 uppercase font-bold tracking-wider">Commande</span>
               <div className="flex items-center gap-2">
                 {getStatusBadge(order.status)}
-                <span className="text-xs text-gray-400">• {new Date(order.created_at).toLocaleString()}</span>
+                {/* ✅ CORRECTION : Date safe */}
+                <span className="text-xs text-gray-400">• {new Date(order.created_at || Date.now()).toLocaleString()}</span>
               </div>
             </div>
           </div>
@@ -75,8 +75,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
         {/* BODY */}
         <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-slate-950">
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            
-            {/* GAUCHE : ITEMS */}
             <div className="lg:col-span-2 space-y-6">
               <div className="bg-gray-50 dark:bg-slate-900 rounded-xl border border-gray-100 dark:border-slate-800 overflow-hidden">
                   <table className="w-full text-left text-sm">
@@ -92,7 +90,8 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                           <tr key={idx}>
                             <td className="px-4 py-3">
                               <span className="font-bold text-gray-800 dark:text-white text-base">{item.product_name}</span>
-                              {renderOrderItemDetails(item.options)}
+                              {/* ✅ CORRECTION : Cast explicit */}
+                              {renderOrderItemDetails(item.options as any)}
                             </td>
                             <td className="px-4 py-3 text-center font-medium bg-white/50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-300">
                                 {item.quantity}
@@ -105,17 +104,11 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                     </tbody>
                   </table>
               </div>
-
-              {/* Résumé Financier */}
               <div className="flex justify-end">
                 <div className="w-64 bg-gray-50 dark:bg-slate-900 rounded-xl p-4 space-y-2 border border-gray-100 dark:border-slate-800">
                   <div className="flex justify-between text-sm text-gray-600 dark:text-slate-400">
                     <span>Sous-total</span>
                     <span>{subtotal.toFixed(2)} DH</span>
-                  </div>
-                  <div className="flex justify-between text-sm text-gray-600 dark:text-slate-400">
-                    <span>Livraison</span>
-                    <span>0.00 DH</span>
                   </div>
                   <div className="pt-2 border-t border-gray-200 dark:border-slate-700 flex justify-between items-center">
                     <span className="font-bold text-gray-900 dark:text-white">Total à payer</span>
@@ -125,7 +118,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
               </div>
             </div>
 
-            {/* DROITE : CLIENT & INFO */}
             <div className="space-y-6">
               <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-xl p-5 shadow-sm">
                 <h3 className="text-xs font-bold text-gray-400 uppercase mb-4 flex items-center gap-2">
@@ -157,8 +149,8 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                     <span className="text-sm font-bold uppercase bg-gray-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
                       {order.payment_method || 'Espèces'}
                     </span>
-                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${order.payment_status === 'paid' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
-                      {order.payment_status === 'paid' ? 'PAYÉ' : 'EN ATTENTE'}
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full ${isPaid ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>
+                      {isPaid ? 'PAYÉ' : 'EN ATTENTE'}
                     </span>
                   </div>
                 </div>
@@ -180,10 +172,8 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
 
         {/* FOOTER ACTIONS */}
         <div className="p-4 border-t border-gray-200 dark:border-slate-800 bg-gray-50 dark:bg-slate-900 flex justify-between items-center">
-          
           <div className="flex items-center gap-4">
-               {/* BOUTON ENCAISSER */}
-               {order.payment_status !== 'paid' && order.status !== 'cancelled' && (
+               {!isPaid && order.status !== 'cancelled' && (
                   <button 
                     onClick={() => setShowPayment(true)}
                     className="px-6 py-3 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold shadow-lg shadow-green-500/20 active:scale-95 transition-all flex items-center gap-2"
@@ -192,14 +182,12 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
                     ENCAISSER
                   </button>
                )}
-               {/* BOUTON ANNULER */}
                {order.status !== 'cancelled' && order.status !== 'delivered' && (
                     <button onClick={() => onUpdateStatus('cancelled')} className="px-4 py-2 text-red-600 dark:text-red-400 font-bold hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors text-sm">
                         Annuler
                     </button>
                )}
           </div>
-          
           <div className="flex gap-3">
             {getNextActions().map((action, i) => (
               <button
@@ -214,7 +202,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
         </div>
       </div>
 
-      {/* MODAL PAIEMENT */}
       {showPayment && (
           <PaymentModal 
              total={subtotal}
@@ -222,7 +209,6 @@ const OrderDetailsModal: React.FC<OrderDetailsModalProps> = ({ order, onClose, o
              onConfirm={handlePaymentConfirm}
           />
       )}
-
     </div>
   );
 };
