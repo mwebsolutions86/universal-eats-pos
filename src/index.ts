@@ -141,7 +141,7 @@ app.on('ready', () => {
   ipcMain.handle('db:pay-order', async (_event, orderId, method, amount) => {
     console.log(`💰 Encaissement Commande ${orderId} via ${method}`);
     try {
-      const stmt = db.prepare(`UPDATE local_orders SET payment_status = 'paid', payment_method = ?, amount_received = ?, status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END WHERE id = ?`);
+      const stmt = db.prepare(`UPDATE local_orders SET payment_status = 'collected', payment_method = ?, amount_received = ?, status = CASE WHEN status = 'pending' THEN 'confirmed' ELSE status END WHERE id = ?`);
       stmt.run(method, amount, orderId);
       if (syncService) await syncService.pushPayment(orderId, method, amount);
       return true;
@@ -158,7 +158,7 @@ app.on('ready', () => {
     try {
         const insertOrder = db.prepare(`INSERT INTO local_orders (id, order_number, store_id, customer_id, customer_name, order_type, total_amount, status, payment_status, payment_method, amount_received, created_at, sync_status, channel) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), 'new_local', 'pos')`);
         const status = paymentMethod ? 'confirmed' : 'pending';
-        const payStatus = paymentMethod ? 'paid' : 'pending';
+        const payStatus = paymentMethod ? 'collected' : 'pending';
         insertOrder.run(orderId, orderNumber, storeId, customerId, 'Client Comptoir', orderType, total, status, payStatus, paymentMethod, amountReceived);
 
         const insertItem = db.prepare(`INSERT INTO local_order_items (id, order_id, product_id, product_name, quantity, unit_price, total_price, options) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);

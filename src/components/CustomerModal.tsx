@@ -15,7 +15,7 @@ const CustomerModal: React.FC<CustomerModalProps> = ({ onClose, onSelectCustomer
   const [view, setView] = useState<'search' | 'create'>('search');
   
   // Formulaire de création
-  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '' });
+  const [newCustomer, setNewCustomer] = useState({ full_name: '', phone: '', address: '', email: '' });
   const [loading, setLoading] = useState(false);
 
   // Recherche automatique quand on tape
@@ -134,6 +134,16 @@ const CustomerModal: React.FC<CustomerModalProps> = ({ onClose, onSelectCustomer
                   placeholder="06..."
                   value={newCustomer.phone}
                   onChange={e => setNewCustomer({...newCustomer, phone: e.target.value})}
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase mb-1">Email</label>
+                <input 
+                  className="w-full p-3 border-2 border-gray-100 focus:border-orange-500 rounded-lg outline-none"
+                  type="email"
+                  placeholder="client@example.com"
+                  value={newCustomer.email}
+                  onChange={e => setNewCustomer({...newCustomer, email: e.target.value})}
                 />
               </div>
               <div>

@@ -61,7 +61,7 @@ export class SyncService {
       await this.initContext();
       console.log(`☁️ PUSH Paiement: ${orderId}`);
       const client = this.supabaseAdmin || this.supabase;
-      const { error } = await client.from('orders').update({ payment_status: 'paid', payment_method: method, amount_received: amount, status: 'confirmed' }).eq('id', orderId);
+      const { error } = await client.from('orders').update({ payment_status: 'collected', payment_method: method, amount_received: amount, status: 'confirmed' }).eq('id', orderId);
       if (error) { console.error("❌ ECHEC PUSH Paiement:", error); return false; }
       return true;
     } catch (e) { console.error("Erreur pushPayment:", e); return false; }
